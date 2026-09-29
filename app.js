@@ -20,10 +20,10 @@ const icon=n=>`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${ICONS[n]||
 function icons(root=document){root.querySelectorAll('[data-icon]').forEach(e=>e.innerHTML=icon(e.dataset.icon));}
 icons();
 let saved=null;try{saved=sanitizeSave(JSON.parse(localStorage.getItem('bichi-pond-v1')??localStorage.getItem('xitan-pond-v1')??localStorage.getItem('bitan-pond-v1')));}catch{}
-const defaults={weather:'sunny',speed:1,turtles:true,crabs:true,silverCarp:true,butterflies:true,names:false,quality:'high',autoWeather:false,location:null,night:false,water:true,waterType:'stream',waterVol:.6,weatherSound:true,weatherVol:.6,music:'guqin',musicVol:.5,sfx:true,volume:.7,rainAmount:.5,snowAmount:.5};
+const defaults={weather:'sunny',speed:1,turtles:true,crabs:true,silverCarp:true,butterflies:true,names:false,quality:'high',autoWeather:false,location:null,night:false,water:true,waterType:'stream',waterVol:.6,weatherSound:true,weatherVol:.6,music:'guqin',musicVol:.5,sfx:true,volume:.7,rainAmount:.5,snowAmount:.5,soundOn:false};
 const settings={...defaults};
 // Copy valid values from a stored settings object (this page's save, or one written by another window).
-function readSettings(src){for(const key of ['turtles','crabs','silverCarp','butterflies','names','autoWeather','night','sfx','water','weatherSound'])if(typeof src[key]==='boolean')settings[key]=src[key];
+function readSettings(src){for(const key of ['turtles','crabs','silverCarp','butterflies','names','autoWeather','night','sfx','water','weatherSound','soundOn'])if(typeof src[key]==='boolean')settings[key]=src[key];
   if(PondAudio.MUSIC.includes(src.music))settings.music=src.music;if(PondAudio.WATERS.includes(src.waterType))settings.waterType=src.waterType;for(const key of ['volume','waterVol','weatherVol','musicVol','rainAmount','snowAmount'])if(Number.isFinite(src[key]))settings[key]=clamp(src[key],0,1);
   if(['sunny','cloudy','rain','snow'].includes(src.weather))settings.weather=src.weather;
   settings.speed=clamp(Number(src.speed)||1,.3,2);
@@ -64,7 +64,7 @@ function applyExternalSave(raw){let data;try{data=JSON.parse(raw);}catch{return;
       Object.assign(f,{name:src.name,palette:src.palette,size:src.size,seed:src.seed,marks:src.marks,eaten:Math.max(f.eaten,src.eaten)});if(look)f.spriteReady=false;return f;});
     for(const f of simulation.fish)if(!next.includes(f)&&scene){scene.drop(f.x*width,f.y*height,12*scene.scale,.8);scene.wakes.delete(f);}
     simulation.fish.splice(0,simulation.fish.length,...next);simulation.residentsOn=settings.silverCarp;simulation.allFish.forEach((f,i)=>{if(f.spriteCell!==i)f.spriteReady=false;});uploadSprites();
-    if(settings.quality!==quality)resize();applyWeather();if(settings.autoWeather&&!auto)fetchWeather();
+    if(settings.quality!==quality)resize();applyWeather();if(settings.autoWeather&&!auto)fetchWeather();syncSound();
   }else for(const src of s.fish){const f=byId.get(src.id);if(f)f.eaten=Math.max(f.eaten,src.eaten);}
   editSig=editSignature();updateMeta();if(activePanel==='ranking')renderRanking();}
 window.__pondSync=applyExternalSave;
@@ -169,16 +169,22 @@ function setZen(value){zen=value;document.body.classList.toggle('zen',zen);docum
 $('#zen-button').addEventListener('click',()=>setZen(true));$('#exit-zen').addEventListener('click',()=>{setZen(false);if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});});
 document.addEventListener('keydown',e=>{if(['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName))return;if(e.key==='Escape'&&!dialog.open)setZen(false);if(e.key.toLowerCase()==='h'&&!dialog.open)setZen(!zen);});
 document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement)setZen(false);});
-async function toggleSound(){try{const on=await sound.toggle();$('#sound-button').innerHTML=icon(on?'sound':'sound-off');$('#sound-button').setAttribute('aria-pressed',on);$('#sound-button').setAttribute('aria-label',on?'关闭声音':'开启声音');toast(on?'声音已开启，可在设置里分别调节水声、环境音与音乐':'声音已关闭');}catch{toast('当前浏览器无法播放声音');}}
+function updateSoundButton(on){$('#sound-button').innerHTML=icon(on?'sound':'sound-off');$('#sound-button').setAttribute('aria-pressed',on);$('#sound-button').setAttribute('aria-label',on?'关闭声音':'开启声音');}
+let soundSyncing=false;
+// Follow the saved sound setting. The desktop wallpaper's pages carry no controls of their own (the bottom bar is
+// hidden in wallpaper mode and taps on the desktop become food), so this is the only way they can ever play sound.
+async function syncSound(){if(soundSyncing)return sound.active;soundSyncing=true;try{const on=await sound.setActive(settings.soundOn);updateSoundButton(on);return on;}catch{return false;}finally{soundSyncing=false;}}
+async function toggleSound(){try{settings.soundOn=!sound.active;const on=await sound.setActive(settings.soundOn);updateSoundButton(on);toast(on?'声音已开启，可在设置里分别调节水声、环境音与音乐':'声音已关闭');persist();}catch{toast('当前浏览器无法播放声音');}}
 $('#sound-button').addEventListener('click',toggleSound);
+if(settings.soundOn)syncSound();
 document.addEventListener('visibilitychange',()=>{last=0;if(sound.context&&sound.active){if(document.hidden)sound.context.suspend();else sound.context.resume();}if(document.hidden)persist();});
 addEventListener('pagehide',persist);
 function setPausedState(value){paused=!!value;last=0;if(sound.context&&sound.active){if(paused)sound.context.suspend();else sound.context.resume();}}
-// For a host app (the macOS menu-bar item): switch weather or night, pause the pond, read the current state.
+// For a host app (the macOS menu-bar item, the Windows tray): switch weather, night or sound, pause the pond, read the current state.
 window.pondControl={
-  set(o={}){if(['sunny','cloudy','rain','snow'].includes(o.weather)){settings.weather=o.weather;settings.autoWeather=false;weatherRequest++;}if(typeof o.night==='boolean')settings.night=o.night;applyWeather();persist();if(activePanel==='weather')renderWeather();return this.state();},
+  set(o={}){if(['sunny','cloudy','rain','snow'].includes(o.weather)){settings.weather=o.weather;settings.autoWeather=false;weatherRequest++;}if(typeof o.night==='boolean')settings.night=o.night;if(typeof o.soundOn==='boolean'){settings.soundOn=o.soundOn;syncSound();}applyWeather();persist();if(activePanel==='weather')renderWeather();return this.state();},
   pause(value){setPausedState(value);return this.state();},
-  state(){return{weather:settings.weather,night:settings.night,autoWeather:settings.autoWeather,paused};}
+  state(){return{weather:settings.weather,night:settings.night,autoWeather:settings.autoWeather,soundOn:sound.active,paused};}
 };
 // A tap on the live wallpaper (CSS px): food while there is room for more, otherwise just a ripple that stirs the koi.
 window.pondTap=(x,y)=>{if(!scene)return;if(simulation.food.length<=160){feedMode=true;feedAt(x,y);}else{scene.startle(x,y);scene.drop(x,y,9*scene.scale,.9);simulation.scare(x,y,170*scene.scale);}};

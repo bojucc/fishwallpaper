@@ -321,13 +321,19 @@
         o.connect(bp).connect(g).connect(p).connect(this.weatherBus); o.start(s); o.stop(s + pulses / rate + .05);
       }
     }
-    async toggle() {
-      if (!this.context) this.setup();
-      this.active = !this.active;
+    // Switch the sound to a known state rather than flipping it, so pages can follow one shared setting.
+    async setActive(on) {
+      const next = !!on;
+      if (next) { if (!this.context) this.setup(); }
+      else if (!this.context) { this.active = false; return this.active; }
+      this.active = next;
       if (this.active) await this.context.resume();
       this.refresh();
       if (!this.active) setTimeout(() => { if (!this.active) this.context.suspend(); }, 2500);
       return this.active;
+    }
+    async toggle() {
+      return this.setActive(!this.active);
     }
     ok() { return this.context && this.context.state === 'running' && this.active && this.opts.sfx; }
     // Food scattering on the surface: a few small drops with a hiss of spray.
