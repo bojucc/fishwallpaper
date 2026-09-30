@@ -19,11 +19,12 @@ namespace BichiPond
         private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run", RunName = "BichiKoiPond";
         private readonly List<WallpaperForm> walls = new List<WallpaperForm>();
         private readonly NotifyIcon tray = new NotifyIcon();
+        private ToolStripMenuItem soundItem;
         private readonly Timer watch = new Timer { Interval = 1000 };
         private readonly ShellWatcher shell;
         private CoreWebView2Environment env;
         private InteractiveForm window;
-        private bool userPaused, locked, rebuilding, quitting;
+        private bool userPaused, locked, rebuilding, quitting, soundOn;
         private string weather = "sunny";
         private bool night;
         // Taps on the desktop, seen through a low-level mouse hook (the desktop icons layer takes the real clicks).
@@ -68,7 +69,12 @@ namespace BichiPond
                 return;
             }
             string data = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BichiPond", "WebView2");
-            env = await CoreWebView2Environment.CreateAsync(null, data);
+            // A wallpaper page is clicked through to the desktop's icon layer (see TapIfDesktop), so it never sees a real
+            // user gesture; Chromium's autoplay policy would then keep its AudioContext suspended forever and the desktop
+            // pond would stay silent however the sound setting is switched. The interactive window gets gestures itself,
+            // which is why sound only ever worked there.
+            var options = new CoreWebView2EnvironmentOptions("--autoplay-policy=no-user-gesture-required");
+            env = await CoreWebView2Environment.CreateAsync(null, data, options);
             await BuildWallpapers();
             hookProc = OnMouse;
             hook = Native.SetWindowsHookEx(Native.WH_MOUSE_LL, hookProc, Native.GetModuleHandle(null), 0);
@@ -112,6 +118,8 @@ namespace BichiPond
             if (w.Success) weather = w.Groups[1].Value;
             var n = Regex.Match(json, "\"night\":(true|false)");
             if (n.Success) night = n.Groups[1].Value == "true";
+            var s = Regex.Match(json, "\"soundOn\":(true|false)");
+            if (s.Success) soundOn = s.Groups[1].Value == "true";
         }
 
         // A menu command goes to one page (the interactive window if open); its save carries the change to the others.
@@ -213,6 +221,9 @@ namespace BichiPond
             menu.Items.Add(weatherMenu);
             var pause = new ToolStripMenuItem("暂停壁纸动画", null, (s, e) => { userPaused = !userPaused; UpdateVisibility(); });
             menu.Items.Add(pause);
+            // The wallpaper pages have no controls of their own, so sound is switched from here (or the window's bottom bar).
+            soundItem = new ToolStripMenuItem("声音", null, (s, e) => { soundOn = !soundOn; Command(soundOn ? "{soundOn:true}" : "{soundOn:false}"); });
+            menu.Items.Add(soundItem);
             menu.Items.Add("重载桌面壁纸", null, (s, e) => Rebuild(0));
             var startup = new ToolStripMenuItem("开机时启动", null, (s, e) => SetStartup(!IsStartup()));
             menu.Items.Add(startup);
@@ -221,7 +232,7 @@ namespace BichiPond
             menu.Opening += (s, e) =>
             {
                 foreach (ToolStripItem i in weatherMenu.DropDownItems) if (i is ToolStripMenuItem mi && mi.Tag is string v) mi.Checked = v == weather;
-                nightItem.Checked = night; pause.Checked = userPaused; startup.Checked = IsStartup();
+                nightItem.Checked = night; pause.Checked = userPaused; startup.Checked = IsStartup(); soundItem.Checked = soundOn;
             };
             tray.ContextMenuStrip = menu;
             tray.DoubleClick += (s, e) => OpenWindow();
