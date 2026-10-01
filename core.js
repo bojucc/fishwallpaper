@@ -7,8 +7,16 @@
     { name: '白写', base: '#efeee5', spot: '#1e2727', fin: '#ecebe3', kind: 'utsuri' },
     { name: '丹顶', base: '#f6f3ea', spot: '#cf3f2b', fin: '#f2f1e9', kind: 'tancho' },
     { name: '墨鲤', base: '#2a3130', spot: '#161c1d', fin: '#444c49', kind: 'karasu' },
-    { name: '纯红', base: '#cb3025', spot: '#cb3025', fin: '#c9382c', kind: 'benigoi' }
+    { name: '纯红', base: '#cb3025', spot: '#cb3025', fin: '#c9382c', kind: 'benigoi' },
+    { name: '纯白', base: '#fbfaf4', spot: '#fbfaf4', fin: '#f3f1e7', kind: 'shiro' }
   ];
+  const POND_MATERIALS = Object.freeze([
+    { id: 'stone', name: '青石板', description: '清凉细纹，水色更通透' },
+    { id: 'pebble', name: '鹅卵石', description: '圆润颗粒，光影更柔和' },
+    { id: 'mud', name: '深泥底', description: '沉静深色，突出锦鲤色彩' },
+    { id: 'moss', name: '青苔砖', description: '青绿苔痕，带一点古意' }
+  ]);
+  const normalizePondMaterial = value => POND_MATERIALS.some(m => m.id === value) ? value : 'stone';
   const SILVER_CARP = { name: '青鲢', base: '#184140', spot: '#184140', fin: '#a9c4bd', kind: 'silvercarp' };
   const fishPalette = f => f.species === 'silvercarp' ? SILVER_CARP : PALETTES[f.palette] || PALETTES[0];
   // Fish body in local units: nose at +34, tail tip at -58; sprites span x -60..36, y -14..14.
@@ -17,6 +25,41 @@
   function randomSeed(seed) { let s = seed >>> 0; return () => { s = (1664525 * s + 1013904223) >>> 0; return s / 4294967296; }; }
   function weatherFromCode(code) { if ([71,73,75,77,85,86].includes(code)) return 'snow'; if (code >= 51) return 'rain'; if (code >= 2) return 'cloudy'; return 'sunny'; }
   const clamp = (x,a,b) => Math.max(a,Math.min(b,x));
+  const normalizeCardOpacity = value => Number.isFinite(value) ? clamp(value,.10,.95) : .78;
+  const SEASON_MODES = ['auto','spring','summer','autumn','winter'];
+  function normalizeSeasonMode(value) { return SEASON_MODES.includes(value) ? value : 'auto'; }
+  function seasonForMonth(month) {
+    const m = Number(month);
+    if (m >= 3 && m <= 5) return 'spring';
+    if (m >= 6 && m <= 8) return 'summer';
+    if (m >= 9 && m <= 11) return 'autumn';
+    return 'winter';
+  }
+  function monthInTimeZone(date, timeZone) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return new Date().getMonth() + 1;
+    if (!timeZone) return date.getMonth() + 1;
+    try {
+      const parts = new Intl.DateTimeFormat('en-US', { timeZone, month: 'numeric' }).formatToParts(date);
+      const month = Number(parts.find(p => p.type === 'month')?.value);
+      return Number.isInteger(month) ? month : date.getMonth() + 1;
+    } catch { return date.getMonth() + 1; }
+  }
+  function resolveSeason(mode, date = new Date(), timeZone) {
+    const normalized = normalizeSeasonMode(mode);
+    return normalized === 'auto' ? seasonForMonth(monthInTimeZone(date, timeZone)) : normalized;
+  }
+  function growthScaleForEaten(eaten, species) {
+    if (species === 'silvercarp') return 1;
+    const count = Math.max(0, Math.floor(Number(eaten) || 0));
+    return count >= 210 ? 2 : count >= 120 ? 1.8 : count >= 50 ? 1.5 : 1;
+  }
+  function fishRenderSize(fish, sceneScale = 1) {
+    return (Number(fish?.size) || .8) * growthScaleForEaten(fish?.eaten, fish?.species) * (Number(sceneScale) || 1);
+  }
+  function normalizeForecast(data) {
+    const daily = data?.daily || {}, times = Array.isArray(daily.time) ? daily.time : [], codes = Array.isArray(daily.weather_code) ? daily.weather_code : [], maxes = Array.isArray(daily.temperature_2m_max) ? daily.temperature_2m_max : [], mins = Array.isArray(daily.temperature_2m_min) ? daily.temperature_2m_min : [];
+    return Array.from({length:3},(_,i)=>({date:typeof times[i]==='string'?times[i]:'',weather:weatherFromCode(Number(codes[i])),max:Number.isFinite(maxes[i])?Math.round(maxes[i]):null,min:Number.isFinite(mins[i])?Math.round(mins[i]):null}));
+  }
   const wrap = a => Math.atan2(Math.sin(a), Math.cos(a));
   function createFish(index, random = Math.random) {
     const names = ['锦时','小满','丹朱','听雨','白露','金盏','青禾','望舒','知秋','浮玉','映月','点绛','云游','春水','琥珀','松墨','桃夭','长安','涟漪','拾光','朝露','小暑','如意','团团'];
@@ -103,7 +146,7 @@
       if(this.food.some(p=>p.eaten))this.food=this.food.filter(p=>!p.eaten);
     }
     swim(f,dt,neighbours=this.allFish) {
-      const w=this.width,h=this.height,s=f.size*this.scale,L=BODY.length*s,random=this.random,silver=f.species==='silvercarp';
+      const w=this.width,h=this.height,s=fishRenderSize(f,this.scale),L=BODY.length*s,random=this.random,silver=f.species==='silvercarp';
       let x=f.x*w,y=f.y*h;const cos=Math.cos(f.angle),sin=Math.sin(f.angle),mx=x+cos*BODY.nose*s,my=y+sin*BODY.nose*s;
       let food=null,fd=Infinity;const reach=Math.max(w,h)*f.appetite;
       for(const p of (f.species === 'silvercarp' ? [] : this.food)){if(p.eaten)continue;const d=Math.hypot(p.x-mx,p.y-my);if(d<fd&&d<reach&&p.age>f.react+d/650){fd=d;food=p;}}
@@ -170,7 +213,7 @@
     });
     return fish.length?{fish,settings:data.settings&&typeof data.settings==='object'?data.settings:{},daily:data.daily}:null;
   }
-  const api={PALETTES,SILVER_CARP,fishPalette,createSilverCarpShoal,BODY,randomSeed,weatherFromCode,clamp,wrap,createFish,updateSpine,fishPose,PondSimulation,sanitizeSave};
+  const api={PALETTES,SILVER_CARP,POND_MATERIALS,normalizePondMaterial,fishPalette,createSilverCarpShoal,BODY,randomSeed,weatherFromCode,clamp,normalizeCardOpacity,normalizeSeasonMode,seasonForMonth,resolveSeason,growthScaleForEaten,fishRenderSize,normalizeForecast,wrap,createFish,updateSpine,fishPose,PondSimulation,sanitizeSave};
   if(typeof module!=='undefined'&&module.exports)module.exports=api;
   else root.PondCore=api;
 })(typeof window!=='undefined'?window:globalThis);

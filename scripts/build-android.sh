@@ -18,7 +18,7 @@ cd "$ROOT/android"
 # Package the current pond, never a stale copy: assets/ is rebuilt from the web sources every time.
 rm -rf assets && mkdir -p assets/assets
 for f in index.html app.js core.js art.js gl.js scene.js audio.js style.css; do cp "$ROOT/$f" assets/; done
-cp "$ROOT/assets/pond.jpg" "$ROOT/assets/pond-data.js" "$ROOT/assets/favicon.svg" assets/assets/
+cp "$ROOT/assets/pond.jpg" "$ROOT/assets/pondchun.png" "$ROOT/assets/pondxia.png" "$ROOT/assets/pondqiu.png" "$ROOT/assets/ponddong.png" "$ROOT/assets/pondchun-foreground.png" "$ROOT/assets/pondxia-foreground.png" "$ROOT/assets/pondqiu-foreground.png" "$ROOT/assets/ponddong-foreground.png" "$ROOT/assets/frog.png" "$ROOT/assets/turtle.png" "$ROOT/assets/egret-flight.png" "$ROOT/assets/egret-rest.png" "$ROOT/assets/pond-data.js" "$ROOT/assets/favicon.svg" assets/assets/
 
 # Keep the signing key between builds, so a new APK installs over the old one without losing the pond.
 [[ -f build/bichi.keystore ]] && cp build/bichi.keystore "$ROOT/android/.bichi.keystore.keep"

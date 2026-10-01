@@ -3,9 +3,12 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const fs = require('node:fs');
 const core = require('../core.js');
-const context = { window: { PondCore: core }, ImageData: class {
-  constructor(width, height) { this.width = width; this.height = height; this.data = new Uint8ClampedArray(width * height * 4); }
-} };
+const gradient = { addColorStop() {} };
+class TestImageData { constructor(width, height) { this.width = width; this.height = height; this.data = new Uint8ClampedArray(width * height * 4); } }
+const drawContext = new Proxy({}, { get(target, key) { if (key === 'createLinearGradient' || key === 'createRadialGradient') return () => gradient; if (key === 'createImageData') return (w, h) => new TestImageData(w, h); if (key === 'getImageData') return (...args) => new TestImageData(args[2] || 1, args[3] || 1); return () => {}; } });
+const document = { createElement() { return { width: 0, height: 0, getContext() { return drawContext; } }; } };
+const context = { window: { PondCore: core }, document, Path2D: class { moveTo() {} lineTo() {} bezierCurveTo() {} quadraticCurveTo() {} closePath() {} }, ImageData: TestImageData
+};
 vm.runInNewContext(fs.readFileSync(require.resolve('../art.js'), 'utf8'), context);
 const art = context.window.PondArt;
 test('锦鲤头部是圆钝的吻部、明显窄于身体最宽处，最宽处在身体前部约五分之二', () => {
@@ -63,4 +66,13 @@ test('青鲢体形比锦鲤修长，背脊深青、两侧腹缘白色', () => {
     }
     assert.ok(sample(-33, 0).rgba[3] > 200, '细长尾柄应连到尾鳍');
   }
+});
+
+test('miscSprites 接受外部青蛙素材并保留程序回退', () => {
+  const fallback = art.miscSprites().frog;
+  const custom = { canvas: {}, w: 256, h: 192, ppu: 8, px: .5, py: .5 };
+  const selected = art.miscSprites(custom).frog;
+  assert.equal(selected.w, 256); assert.equal(selected.h, 192); assert.equal(selected.ppu, 8);
+  assert.equal(fallback.ppu, 5);
+  assert.ok(fallback.canvas.width > 0 && fallback.canvas.height > 0);
 });

@@ -94,7 +94,8 @@ void main(){
 
   const FS_BED = `#version 300 es
 precision highp float;
-uniform sampler2D uBed, uShadow, uCaustic, uFloat, uCloud;
+  uniform sampler2D uBed, uShadow, uCaustic, uFloat, uCloud, uNoise;
+  uniform int uMaterial;
 uniform vec3 uBedU, uBedV; uniform vec2 uFloatShift, uShadowTexel; uniform float uCausticK, uShadowK; uniform vec3 uCausticTint;
 in vec2 vUv; out vec4 o;
 ${BED}
@@ -106,6 +107,37 @@ void main(){
   vec2 b = bedUv(vUv);
   // Under a leaf there is only shaded water; painting it plainly keeps refraction from dragging copies of the leaf out.
   vec3 c = mix(texture(uBed, b).rgb, textureLod(uBed, b, 5.).rgb * .82, texture(uFloat, b).r);
+  // A small procedural material pass keeps the four pond beds lightweight and image-independent.
+  float grain = texture(uNoise, b * 14.0).r;
+  if (uMaterial == 0) {
+    // Irregular Voronoi slabs read as worn blue stone, without the old square grid.
+    vec2 p = b * vec2(10.0, 7.0) + (texture(uNoise, b * vec2(2.0, 1.4)).rg - .5) * .3;
+    vec2 cell = floor(p), local = fract(p);
+    float nearest = 8.0, second = 8.0;
+    for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+      vec2 neighbor = vec2(float(x), float(y));
+      vec2 hashInput = cell + neighbor;
+      vec2 hashValue = fract(sin(vec2(dot(hashInput, vec2(127.1, 311.7)), dot(hashInput, vec2(269.5, 183.3)))) * 43758.5453);
+      vec2 delta = neighbor + mix(vec2(.18), vec2(.82), hashValue) - local;
+      float distanceToStone = dot(delta, delta);
+      if (distanceToStone < nearest) { second = nearest; nearest = distanceToStone; }
+      else if (distanceToStone < second) second = distanceToStone;
+    }
+    float stoneEdge = 1.0 - smoothstep(.018, .075, sqrt(second) - sqrt(nearest));
+    float slabGrain = texture(uNoise, b * 9.0 + vec2(grain)).g;
+    vec3 slateColor = mix(vec3(.23, .34, .39), vec3(.4, .5, .54), slabGrain) * (1.0 - stoneEdge * .3);
+    float waterMask = smoothstep(-.04, .08, c.b - c.g);
+    c = mix(c, slateColor, .18 * waterMask);
+  } else if (uMaterial == 1) {
+    float pebble = smoothstep(.58, .82, texture(uNoise, b * 38.0).g);
+    c = mix(c * vec3(.98, 1.01, .97), c * vec3(.78, .84, .76), pebble * .22);
+  } else if (uMaterial == 2) {
+    c *= vec3(.74, .77, .68) + grain * vec3(.08, .07, .04);
+  } else {
+    vec2 brick = abs(fract(b * vec2(17.0, 11.0)) - .5);
+    float joint = 1.0 - smoothstep(.02, .06, min(brick.x, brick.y));
+    c = mix(c * vec3(.84, .94, .82), c * vec3(.58, .72, .55), joint * .34);
+  }
   // In sunshine shadows are crisp and dark; under a cloud only a soft, pale patch stays beneath each fish.
   float sun = 1. - texture(uCloud, vUv).r;
   float sh = max(shadowAt(vUv, .3 + (1. - sun) * 1.7), textureLod(uFloat, b - uFloatShift, 2. + (1. - sun)).g * .6) * mix(.42, 1., sun);
@@ -137,7 +169,8 @@ void main(){
   vec2 across = vec2(dFdx(vLight.x), dFdy(vLight.x));
   float a = t.a * vColor.a, sun = 1. - texture(uCloud, vScreen).r;
   if (uMode == 1) { o = vec4(0., 0., 0., a * mix(1., .35 + .65 * sun, uShadowCloud)); return; }
-  vec3 rgb = t.rgb * vColor.rgb * vColor.a;
+  // The atlas is uploaded with UNPACK_PREMULTIPLY_ALPHA_WEBGL; multiplying RGB by alpha again makes koi bodies look translucent.
+  vec3 rgb = t.rgb * vColor.rgb;
   if (vLight.y > .02) {
     float q = vLight.x / vLight.y, lat = clamp(q, -.999, .999), body = 1. - smoothstep(.96, 1.02, abs(q)), lk = uLightK * mix(.3, 1., sun);
     vec3 n = vec3(normalize(across + 1e-7) * lat, sqrt(1. - lat * lat)), L = normalize(uLight);
@@ -230,7 +263,8 @@ void main(){
     vec2 toMoon = normalize(uMoonDisc.xy - px + 1e-4);
     float reach = exp(-length(px - uMoonDisc.xy) / (uMoonDisc.z * 16.));
     night += vec3(.55, .66, .9) * (max(0., dot(-g, toMoon)) * .6 + length(g) * .14) * (.35 + .65 * reach) * (.4 + .6 * illum);
-    night = (night + glint) * uMoon * (1. - cloud * .9);
+    // Rain keeps a little more ambient moonlight even under a full cloud deck, so the pond remains readable.
+    night = (night + glint) * uMoon * (1. - cloud * (uMoon < 1.2 ? .55 : .9));
     glint = vec3(0.);
   }
   col += glint;
@@ -498,7 +532,7 @@ void main(){
     for (const s of Object.values(sprites)) gl.texSubImage2D(gl.TEXTURE_2D, 0, s.x, s.y, gl.RGBA, gl.UNSIGNED_BYTE, s.canvas);
     let atlasDirty = true;
 
-    const state = { w: 1, h: 1, dpr: 1, quality: 'high', scene: null, shadow: null, caustic: null, surface: null, cloud: null, sim: [null, null], simW: 1, simH: 1, simAcc: 0, bed: { u: [1, 0, 0], v: [0, 1, 0], turn: 0 } };
+    const state = { w: 1, h: 1, dpr: 1, quality: 'high', material: 0, scene: null, shadow: null, caustic: null, surface: null, cloud: null, sim: [null, null], simW: 1, simH: 1, simAcc: 0, bed: { u: [1, 0, 0], v: [0, 1, 0], turn: 0 } };
     const drops = [];
     const batches = {}; for (const l of LAYERS) batches[l] = new Batch();
 
@@ -528,12 +562,29 @@ void main(){
     // Map a point of the painted pond image to screen CSS pixels.
     function imageToScreen(x, y) { return bedToScreen(state.bed, x / bedImage.width, y / bedImage.height, state.w, state.h); }
     function setBed(p) { gl.uniform3fv(p.u('uBedU'), state.bed.u); gl.uniform3fv(p.u('uBedV'), state.bed.v); }
+    function setBedImage(image) {
+      if (!image?.naturalWidth) return;
+      bedImage = image;
+      gl.bindTexture(gl.TEXTURE_2D, bedTex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, bedImage);
+      gl.generateMipmap(gl.TEXTURE_2D);
+      state.bed = fitBed(bedImage.width, bedImage.height, state.w, state.h);
+    }
 
     function setFish(i, sprite) {
       if (i >= MAX_FISH) return;
       const [x, y] = cellOrigin(i);
       gl.bindTexture(gl.TEXTURE_2D, atlas);
       gl.texSubImage2D(gl.TEXTURE_2D, 0, x, y, gl.RGBA, gl.UNSIGNED_BYTE, sprite);
+      atlasDirty = true;
+    }
+
+    function setSprites(next) {
+      packSprites(next);
+      for (const key of Object.keys(sprites)) delete sprites[key];
+      Object.assign(sprites, next);
+      gl.bindTexture(gl.TEXTURE_2D, atlas);
+      for (const s of Object.values(sprites)) gl.texSubImage2D(gl.TEXTURE_2D, 0, s.x, s.y, gl.RGBA, gl.UNSIGNED_BYTE, s.canvas);
       atlasDirty = true;
     }
 
@@ -607,13 +658,14 @@ void main(){
       gl.bindFramebuffer(gl.FRAMEBUFFER, state.scene.fb); gl.viewport(0, 0, state.scene.w, state.scene.h);
       p = P.bed; gl.useProgram(p);
       setBed(p);
-      gl.uniform1f(p.u('uCausticK'), env.caustic); gl.uniform1f(p.u('uShadowK'), env.shadow); gl.uniform3fv(p.u('uCausticTint'), env.causticTint);
+      gl.uniform1f(p.u('uCausticK'), env.caustic); gl.uniform1f(p.u('uShadowK'), env.shadow); gl.uniform3fv(p.u('uCausticTint'), env.causticTint); gl.uniform1i(p.u('uMaterial'), state.material);
       const fo = 11 * Math.min(1.2, Math.min(w, h) / 800);
       const bu = state.bed.u, bv = state.bed.v, sx = env.shadowDir[0] * fo / w, sy = env.shadowDir[1] * fo / h;
       gl.uniform2f(p.u('uFloatShift'), bu[0] * sx + bu[1] * sy, bv[0] * sx + bv[1] * sy);
       gl.uniform2f(p.u('uShadowTexel'), 1 / state.shadow.w, 1 / state.shadow.h);
       bindTex(0, bedTex); gl.uniform1i(p.u('uBed'), 0); bindTex(1, state.shadow.tex); gl.uniform1i(p.u('uShadow'), 1); bindTex(2, state.caustic.tex); gl.uniform1i(p.u('uCaustic'), 2); bindTex(3, floatTex); gl.uniform1i(p.u('uFloat'), 3);
       bindTex(4, state.cloud.tex); gl.uniform1i(p.u('uCloud'), 4);
+      bindTex(5, noiseTex); gl.uniform1i(p.u('uNoise'), 5);
       drawQuad();
       gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
       drawBatch(batches.under, 0, -.9, env.caustic * .35);  // sharper mip: keeps the koi's scales readable at pond size
@@ -640,8 +692,8 @@ void main(){
         gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
         p = P.floater; gl.useProgram(p);
         gl.uniform2f(p.u('uView'), w, h); gl.uniform1f(p.u('uBright'), env.bright); gl.uniform1f(p.u('uSat'), env.sat); gl.uniform1f(p.u('uVignette'), env.vignette); gl.uniform1f(p.u('uShade'), env.shade); gl.uniform3fv(p.u('uTint'), env.tint);
-        gl.uniform1f(p.u('uSnow'), env.snowCover || 0); gl.uniform1f(p.u('uSkyK'), env.skyK); gl.uniform3fv(p.u('uSky'), env.sky);
-        gl.uniform1f(p.u('uWet'), env.wetCover || 0); gl.uniform1f(p.u('uRain'), env.rainK || 0); gl.uniform1f(p.u('uTime'), time); gl.uniform1f(p.u('uCloudShade'), env.cloudShade);
+            gl.uniform1f(p.u('uSnow'), env.snowCover || 0); gl.uniform1f(p.u('uSkyK'), env.skyK); gl.uniform3fv(p.u('uSky'), env.sky);
+            gl.uniform1f(p.u('uWet'), env.wetCover || 0); gl.uniform1f(p.u('uRain'), env.rainK || 0); gl.uniform1f(p.u('uTime'), time); gl.uniform1f(p.u('uCloudShade'), env.cloudShade);
         gl.uniform1f(p.u('uMist'), env.mist || 0); gl.uniform1f(p.u('uFlash'), env.flash || 0);
         bindTex(0, bedTex); gl.uniform1i(p.u('uBed'), 0); bindTex(1, state.surface.tex); gl.uniform1i(p.u('uSurface'), 1); bindTex(2, noiseTex); gl.uniform1i(p.u('uNoise'), 2); bindTex(3, state.cloud.tex); gl.uniform1i(p.u('uCloud'), 3);
         drawElements(batches.floaters);
@@ -657,7 +709,8 @@ void main(){
     }
 
     const api = {
-      kind: 'webgl2', ripples: !!floatRT, sprites, resize, imageToScreen, setFish, render,
+      kind: 'webgl2', ripples: !!floatRT, sprites, resize, imageToScreen, setBedImage, setFish, setSprites, render,
+      setMaterial(value) { state.material = ({ stone: 0, pebble: 1, mud: 2, moss: 3 }[value] ?? 0); },
       drop(x, y, r, s) { if (drops.length < 96) drops.push([x, y, r, s]); },
       // One leaf, flower or rock from the painting (image px ellipse), turned by angle and moved by (dx, dy) screen px.
       floater(ix, iy, irx, iry, rot, angle, dx, dy, push, snowK = 1, wetKind = 1, pool = 0, seed = 0) {
@@ -730,6 +783,9 @@ void main(){
         // The CSS backdrop behind this canvas is a plain centred cover crop, so the painting is never turned here.
         state.bed = fitBed(bedImage.width, bedImage.height, w, h, false);
       },
+      setBedImage(image) { if(image?.naturalWidth){bedImage=image;state.bed=fitBed(bedImage.width,bedImage.height,state.w,state.h,false);} },
+      setSprites(next) { for (const key of Object.keys(sprites)) delete sprites[key]; Object.assign(sprites, next); },
+      setMaterial() {},
       imageToScreen(x, y) { return bedToScreen(state.bed, x / bedImage.width, y / bedImage.height, state.w, state.h); },
       setFish(i, sprite) { const c = fishCanvases[i] || (fishCanvases[i] = document.createElement('canvas')); c.width = sprite.width; c.height = sprite.height; c.getContext('2d').drawImage(sprite, 0, 0); },
       drop(x, y, r, s) { if (s > .05 && rings.length < 60) rings.push({ x, y, age: 0, max: 1 + Math.min(2, s * 3) }); },

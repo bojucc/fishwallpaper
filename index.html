@@ -16,9 +16,10 @@
   <script src="assets/pond-data.js" defer></script>
   <script src="app.js" defer></script>
 </head>
-<body>
+<body class="app-loading">
   <main id="pond" aria-label="锦鲤池塘">
     <div class="pond-bed" aria-hidden="true"></div>
+    <div class="pond-foreground" aria-hidden="true"></div>
     <div class="water-tint" aria-hidden="true"></div>
     <canvas id="world" tabindex="0" aria-label="交互池塘：点击水面投喂锦鲤，按空格在中央投喂"></canvas>
     <div class="vignette" aria-hidden="true"></div>
@@ -27,28 +28,52 @@
       <span class="seal" aria-hidden="true">观</span>
       <div><h1>碧池观鱼</h1><p>A LITTLE POND, A QUIET MIND</p></div>
     </header>
-    <aside class="weather-card ui" aria-label="时间与天气">
-      <div class="weather-top"><span id="weather-location">池畔时光</span><button class="icon-button" data-panel="weather" aria-label="天气设置" data-icon="sliders"></button></div>
-      <time id="clock">--:--</time><div id="calendar"></div>
-      <div class="weather-line"><span id="weather-symbol" data-icon="sun"></span><strong id="weather-label">晴日</strong><span id="temperature">随心天气</span></div>
-      <div class="weather-foot"><span class="status-dot"></span><span id="weather-note">风轻水暖，正宜观鱼</span></div>
+    <div class="weather-stack ui">
+    <aside class="weather-card" aria-label="池塘信息">
+      <div class="card-section card-section-top">
+        <div class="weather-top"><span class="card-title">池畔小记</span><span class="weather-top-actions"><span class="quick-weather" aria-label="快速切换天气">
+          <button data-quick-weather="sunny" aria-label="晴日" data-tooltip="晴日" aria-pressed="true" data-icon="sun"></button>
+          <button data-quick-weather="cloudy" aria-label="多云" data-tooltip="多云" aria-pressed="false" data-icon="cloudy"></button>
+          <button data-quick-weather="rain" aria-label="下雨" data-tooltip="下雨" aria-pressed="false" data-icon="rain"></button>
+          <button data-quick-weather="snow" aria-label="落雪" data-tooltip="落雪" aria-pressed="false" data-icon="snow"></button>
+        </span><button class="icon-button" data-panel="weather" aria-label="天气设置" data-tooltip="天气设置" data-icon="sliders"></button><button id="hide-card" class="icon-button" aria-label="隐藏卡片" data-tooltip="隐藏卡片" data-icon="eye-off"></button></span></div>
+      </div>
+      <div class="card-section card-section-weather">
+        <div class="season-control" aria-label="池塘季节">
+          <span id="season-label">池塘 · 自动</span>
+          <div class="season-options">
+            <button data-season="auto" aria-pressed="true">自动</button>
+            <button data-season="spring" aria-pressed="false">春</button>
+            <button data-season="summer" aria-pressed="false">夏</button>
+            <button data-season="autumn" aria-pressed="false">秋</button>
+            <button data-season="winter" aria-pressed="false">冬</button>
+          </div>
+        </div>
+        <time id="clock">--:--</time><div id="calendar"></div>
+        <div class="weather-location-middle"><strong id="weather-location">池畔时光</strong><small id="weather-mode">手动天气</small></div>
+        <div class="weather-line"><span id="weather-symbol" data-icon="sun"></span><strong id="weather-label">晴日</strong><span id="temperature">随心天气</span></div>
+        <div class="weather-foot"><span class="status-dot"></span><span id="weather-note">风轻水暖，正宜观鱼</span></div>
+        <div class="forecast" id="forecast" aria-label="三天天气"></div>
+      </div>
     </aside>
-    <div class="verse ui"><span>水清鱼读月</span><span>花静鸟谈天</span><i>闲 观</i></div>
-    <div class="pond-meta ui"><span class="status-dot"></span><span id="fish-count">24 尾锦鲤，悠然自得</span><span class="meta-divider"></span><span id="fed-count">今日投喂 0 次</span></div>
-    <div class="bottom-ui ui">
-      <p class="pond-hint" id="pond-hint">轻点水面，投下一点欢喜</p>
-      <nav class="dock" aria-label="池塘工具">
-        <button id="feed-button" class="dock-button active" aria-pressed="true"><span data-icon="feed"></span><span>投喂</span></button>
-        <span class="dock-divider"></span>
-        <button class="dock-button" data-panel="fish"><span data-icon="fish"></span><span>我的锦鲤</span></button>
-        <button class="dock-button" data-panel="ranking"><span data-icon="trophy"></span><span>食量榜</span></button>
-        <button class="dock-button" data-panel="weather"><span data-icon="sun"></span><span>天气</span></button>
-        <span class="dock-divider"></span>
-        <button id="sound-button" class="dock-button compact" aria-label="开启声音" aria-pressed="false"><span data-icon="sound-off"></span></button>
-        <button class="dock-button compact" data-panel="settings" aria-label="池塘设置"><span data-icon="sliders"></span></button>
-        <button id="zen-button" class="dock-button compact" aria-label="进入沉浸模式"><span data-icon="expand"></span></button>
-      </nav>
+    <aside class="actions-card" aria-label="池塘操作与快捷设置">
+      <div class="card-section card-section-actions">
+        <nav class="card-primary-actions" aria-label="池塘内容">
+          <button class="dock-button" data-panel="ranking" data-tooltip="食量榜" aria-label="食量榜"><span data-icon="trophy"></span><span class="icon-label">食量榜</span></button>
+          <button class="dock-button" data-panel="fish" data-tooltip="我的锦鲤" aria-label="我的锦鲤"><span data-icon="fish"></span><span class="icon-label">我的锦鲤</span></button>
+          <button id="feed-button" class="dock-button active" data-tooltip="投喂" aria-label="投喂" aria-pressed="true"><span data-icon="feed"></span><span class="icon-label">投喂</span></button>
+        </nav>
+        <nav class="card-utility-actions" aria-label="快捷设置">
+          <button id="sound-button" class="dock-button" data-tooltip="声音" aria-label="开启声音" aria-pressed="false"><span data-icon="sound-off"></span><span class="icon-label">声音</span></button>
+          <button class="dock-button" data-panel="settings" data-tooltip="设置" aria-label="设置"><span data-icon="sliders"></span><span class="icon-label">设置</span></button>
+          <button id="zen-button" class="dock-button" data-tooltip="全屏" aria-label="进入沉浸模式"><span data-icon="expand"></span><span class="icon-label">全屏</span></button>
+        </nav>
+      </div>
+    </aside>
     </div>
+    <button id="show-card" class="show-card ui" aria-label="显示卡片" data-tooltip="显示卡片" data-icon="eye"></button>
+    <p class="pond-hint ui" id="pond-hint">轻点水面，投下一点欢喜</p>
+    <div class="pond-meta ui"><span class="status-dot"></span><span id="fish-count">24 尾锦鲤，悠然自得</span><span class="meta-divider"></span><span id="fed-count">今日投喂 0 次</span></div>
     <button id="exit-zen" class="zen-exit" hidden>退出沉浸 <kbd>Esc</kbd></button>
     <div id="toast" role="status" aria-live="polite"></div>
   </main>

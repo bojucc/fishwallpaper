@@ -1,6 +1,63 @@
 const test=require('node:test');
 const assert=require('node:assert/strict');
-const {PondSimulation,createFish,randomSeed,weatherFromCode,sanitizeSave,fishPose,BODY,PALETTES,createSilverCarpShoal}=require('../core.js');
+const {PondSimulation,createFish,randomSeed,weatherFromCode,sanitizeSave,normalizeCardOpacity,normalizeForecast,fishPose,BODY,PALETTES,createSilverCarpShoal,growthScaleForEaten,fishRenderSize,normalizeSeasonMode,seasonForMonth,resolveSeason,POND_MATERIALS,normalizePondMaterial}=require('../core.js');
+test('池塘材质只接受四种预设并对非法值回退青石板',()=>{
+  assert.deepEqual(POND_MATERIALS.map(m=>m.id),['stone','pebble','mud','moss']);
+  assert.equal(normalizePondMaterial('pebble'),'pebble');
+  assert.equal(normalizePondMaterial('unknown'),'stone');
+  assert.equal(normalizePondMaterial(undefined),'stone');
+});
+test('卡片透明度默认 78%，并限制在 10% 到 95%',()=>{
+  assert.equal(normalizeCardOpacity(undefined),.78);
+  assert.equal(normalizeCardOpacity(.42),.42);
+  assert.equal(normalizeCardOpacity(0),.10);
+  assert.equal(normalizeCardOpacity(1),.95);
+});
+test('四季按月份边界映射，非法模式归一化为自动',()=>{
+  assert.equal(seasonForMonth(2),'winter');
+  assert.equal(seasonForMonth(3),'spring');
+  assert.equal(seasonForMonth(5),'spring');
+  assert.equal(seasonForMonth(6),'summer');
+  assert.equal(seasonForMonth(8),'summer');
+  assert.equal(seasonForMonth(9),'autumn');
+  assert.equal(seasonForMonth(11),'autumn');
+  assert.equal(seasonForMonth(12),'winter');
+  assert.equal(normalizeSeasonMode('spring'),'spring');
+  assert.equal(normalizeSeasonMode('unknown'),'auto');
+  assert.equal(resolveSeason('winter',new Date('2026-07-01T00:00:00Z')),'winter');
+});
+test('自动季节使用城市时区日期而不是 UTC 日期',()=>{
+  const utcLate=new Date('2026-03-01T04:30:00Z');
+  assert.equal(resolveSeason('auto',utcLate,'America/New_York'),'winter');
+  assert.equal(resolveSeason('auto',utcLate,'Asia/Shanghai'),'spring');
+});
+test('无效时区不会阻塞自动季节解析并回退本机日期',()=>{
+  assert.equal(resolveSeason('auto',new Date('2026-10-01T00:00:00Z'),'not/a-timezone'),'autumn');
+  assert.equal(resolveSeason('auto',new Date('2026-10-01T00:00:00Z')),'autumn');
+});
+test('锦鲤按累计进食量分三段成长，青鲢不成长且不改基础体型',()=>{
+  assert.equal(growthScaleForEaten(0),1);
+  assert.equal(growthScaleForEaten(49),1);
+  assert.equal(growthScaleForEaten(50),1.5);
+  assert.equal(growthScaleForEaten(119),1.5);
+  assert.equal(growthScaleForEaten(120),1.8);
+  assert.equal(growthScaleForEaten(209),1.8);
+  assert.equal(growthScaleForEaten(210),2);
+  assert.equal(growthScaleForEaten(999),2);
+  assert.equal(growthScaleForEaten(210,'silvercarp'),1);
+  const fish={size:.8,eaten:120};
+  assert.ok(Math.abs(fishRenderSize(fish,1)-1.44)<1e-9);
+  assert.equal(fish.size,.8);
+});
+test('三天预报只读取有限数值，并转换天气代码',()=>{
+  const result=normalizeForecast({daily:{time:['2026-09-28','2026-09-29','2026-09-30'],weather_code:[0,63,71],temperature_2m_max:[31,28,NaN],temperature_2m_min:[22,20,NaN]}});
+  assert.deepEqual(result,[
+    {date:'2026-09-28',weather:'sunny',max:31,min:22},
+    {date:'2026-09-29',weather:'rain',max:28,min:20},
+    {date:'2026-09-30',weather:'snow',max:null,min:null}
+  ]);
+  assert.equal(normalizeForecast(null).length,3);
+});
 test('锦鲤会追逐并吃掉鱼食，每颗只记一次',()=>{
   const random=randomSeed(2),fish=createFish(0,random);fish.x=.5;fish.y=.5;fish.angle=0;
   const pond=new PondSimulation([fish],1000,700,random);pond.feed(610,350,8);
@@ -73,6 +130,12 @@ test('纯红花色能随旧存档往返，原有花色编号不变',()=>{
   const saved=sanitizeSave(JSON.parse(JSON.stringify({fish:[{name:'朱砂',palette:red},{name:'墨墨',palette:5}]})));
   assert.equal(saved.fish[0].palette,red);
   assert.equal(PALETTES[saved.fish[1].palette].kind,'karasu');
+});
+test('纯白花色作为手绘底稿，并追加在既有花色之后',()=>{
+  const white=PALETTES.findIndex(p=>p.kind==='shiro');
+  assert.equal(white,PALETTES.length-1);
+  assert.equal(PALETTES[white].name,'纯白');
+  assert.equal(PALETTES[white].base,'#fbfaf4');
 });
 test('青鲢独立于锦鲤名额，混游稳定且不争抢投喂颗粒',()=>{
   const random=randomSeed(38),koi=createFish(0,random),shoal=createSilverCarpShoal(random);

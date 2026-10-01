@@ -321,7 +321,7 @@
         o.connect(bp).connect(g).connect(p).connect(this.weatherBus); o.start(s); o.stop(s + pulses / rate + .05);
       }
     }
-    // Switch the sound to a known state rather than flipping it, so pages can follow one shared setting.
+    // Switch to a known state so multiple wallpaper pages can synchronize without flipping each other.
     async setActive(on) {
       const next = !!on;
       if (next) { if (!this.context) this.setup(); }
@@ -347,6 +347,13 @@
     }
     // A koi taking a pellet: a low, round pop.
     gulp() { if (this.ok()) this.drop(this.context.currentTime, rand(260, 380), .16, rand(-.3, .3), .5); }
+    // A frog hitting the water: one short low splash with a bright spray edge.
+    frogJump() {
+      if (!this.ok()) return;
+      const t = this.context.currentTime;
+      this.drop(t, 95, .3, rand(-.35, .35), .9);
+      this.drop(t + .018, 760, .07, rand(-.45, .45), .35);
+    }
     // A fingertip touching the water.
     tap() { if (this.ok()) this.drop(this.context.currentTime, rand(520, 700), .2, 0, 1.2); }
     drop(t, f, gain, pan, rise = .9) { this.tone(t, f, f * (1 + rise), Math.min(.12, 22 / f + .02) * 1.6, gain, pan, this.sfxBus, 'sine', .002); }

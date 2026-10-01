@@ -275,17 +275,17 @@
 
   // ---------- Turtle ----------
   const TURTLES = [
-    { shell: '#56663a', light: '#7d8a4c', seam: '#2c341f', line: '#cdbb66', skin: '#546238', stripe: '#d3c97a', ear: '#c0482e', plastron: '#c9b56a' },
-    { shell: '#4f4a33', light: '#75694a', seam: '#2a261a', line: '#9f9460', skin: '#56594a', stripe: '#b9b98a', ear: null, plastron: '#b39c62' }
+    { shell: '#5d8963', light: '#92b873', seam: '#275247', line: '#d5e19a', skin: '#648a6d', stripe: '#c9dfa0', ear: '#d66a57', plastron: '#b7ca88' },
+    { shell: '#466e60', light: '#789b70', seam: '#243f3d', line: '#b8d08f', skin: '#587c68', stripe: '#b8d39a', ear: null, plastron: '#a9c181' }
   ];
   function shellSprite(v, ppu) {
     const T = TURTLES[v], W = 50, H = 42, c = canvas(W * ppu, H * ppu), ctx = c.getContext('2d');
     const img = ctx.createImageData(c.width, c.height), d = img.data, n = valueNoise(v * 31 + 5);
     const base = hex(T.shell), light = hex(T.light), seam = hex(T.seam), line = hex(T.line);
-    const centers = [[14.5, 0], [7.2, 0], [0, 0], [-7.2, 0], [-14.2, 0]];
-    for (const x of [10.5, 3.5, -3.5, -10.5]) { centers.push([x, 10.8], [x, -10.8]); }
+    const centers = [[12, 0], [6, 0], [0, 0], [-6, 0], [-12, 0]];
+    for (const x of [8.2, 2.7, -2.7, -8.2]) { centers.push([x, 9.4], [x, -9.4]); }
     for (let py = 0; py < c.height; py++) for (let px = 0; px < c.width; px++) {
-      const x = (px + .5) / ppu - W / 2, y = (py + .5) / ppu - H / 2, rx = 22 * (1 + (x < 0 ? .02 : 0)), ry = 17.6 * (1 + (x < 0 ? -x / rx * .07 : 0));
+      const x = (px + .5) / ppu - W / 2, y = (py + .5) / ppu - H / 2, rx = 19.5 * (1 + (x < 0 ? .02 : 0)), ry = 17.2 * (1 + (x < 0 ? -x / rx * .04 : 0));
       const th = Math.atan2(y / ry, x / rx), serr = Math.abs(Math.cos(th)) > .5 && x < 0 ? .35 * Math.abs(Math.sin(th * 12)) : 0;
       const rr = Math.hypot(x / rx, y / ry), edge = (1 - rr) * Math.min(rx, ry) + serr;
       if (edge < -.8) continue;
@@ -524,8 +524,25 @@
     ctx.fillStyle = s; ctx.fillRect(0, -5, 19, 10); ctx.restore();
     return { canvas: c, ppu, px: .5, py: .5 };
   }
-  function miscSprites() {
-    const s = { fin: finSprite(4, false), finMoto: finSprite(4, true), pellet: pelletSprite(), dot: dotSprite(), flake: flakeSprite(), streak: streakSprite(), ring: ringSprite(), petal: petalSprite() };
+  // A small tree-frog seen from above, sized to sit on a broad lotus leaf.
+  function frogSprite(ppu = 5) {
+    const c = canvas(34 * ppu, 26 * ppu), ctx = c.getContext('2d');
+    ctx.scale(ppu, ppu); ctx.translate(17, 13);
+    ctx.fillStyle = 'rgba(19,49,36,.28)'; ctx.beginPath(); ctx.ellipse(1, 7, 12, 4, -.08, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#6f9a68'; ctx.beginPath(); ctx.ellipse(0, 1, 8.4, 6.6, -.08, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#a9c67f'; ctx.beginPath(); ctx.ellipse(0, 3, 5.8, 3.8, -.08, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#527a58';
+    for (const s of [-1, 1]) { ctx.beginPath(); ctx.ellipse(-7, s * 5.4, 3.2, 1.8, s * .28, 0, TAU); ctx.fill(); ctx.beginPath(); ctx.ellipse(7, s * 5.4, 3.2, 1.8, -s * .28, 0, TAU); ctx.fill(); }
+    ctx.fillStyle = '#c9db9b'; for (const x of [-4.8, 4.8]) { ctx.beginPath(); ctx.arc(x, -4.8, 3, 0, TAU); ctx.fill(); }
+    ctx.fillStyle = '#1e2f27'; for (const x of [-4.8, 4.8]) { ctx.beginPath(); ctx.arc(x, -5.1, 1, 0, TAU); ctx.fill(); }
+    ctx.strokeStyle = 'rgba(37,65,43,.7)'; ctx.lineWidth = .65; ctx.beginPath(); ctx.arc(0, 2, 4.4, .15, Math.PI - .15); ctx.stroke();
+    return { canvas: c, ppu, px: .5, py: .5 };
+  }
+  function miscSprites(frogOverride, turtleOverride, egretFlightOverride, egretRestOverride) {
+    const s = { fin: finSprite(4, false), finMoto: finSprite(4, true), pellet: pelletSprite(), dot: dotSprite(), flake: flakeSprite(), streak: streakSprite(), ring: ringSprite(), petal: petalSprite(), frog: frogOverride || frogSprite() };
+    if (egretFlightOverride) s.egretFlight = egretFlightOverride;
+    if (egretRestOverride) s.egretRest = egretRestOverride;
+    if (turtleOverride) s.turtleReal = turtleOverride;
     for (let v = 0; v < TURTLES.length; v++) { const t = turtleSprites(v); for (const k in t) s[`turtle${v}_${k}`] = t[k]; }
     for (let b = 0; b < BUTTERFLIES.length; b++) { const t = butterflySprites(b); s[`bf${b}_wing`] = t.wing; s[`bf${b}_body`] = t.body; }
     for (let d = 0; d < DRAGONFLIES.length; d++) { const t = dragonflySprites(d); s[`df${d}_wing`] = t.wing; s[`df${d}_body`] = t.body; }
