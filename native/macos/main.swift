@@ -122,7 +122,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   private static let rectsJS = """
   (() => {
     const r = [];
-    for (const el of document.querySelectorAll('.dock, .weather-card, .actions-card, .zen-exit:not([hidden])')) {
+    for (const el of document.querySelectorAll('.dock, .weather-card, .zen-exit:not([hidden])')) {
       const b = el.getBoundingClientRect(), s = getComputedStyle(el);
       if (b.width > 1 && b.height > 1 && s.visibility !== 'hidden' && parseFloat(s.opacity) > .05) r.push([b.x, b.y, b.width, b.height]);
     }

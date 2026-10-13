@@ -4,9 +4,6 @@
   const { PALETTES, fishPalette, BODY, clamp, wrap, fishPose, fishRenderSize } = root.PondCore;
   const { halfWidth, girthOf } = root.PondArt;
   const TAU = Math.PI * 2;
-  // The saved size and growth values remain unchanged; this is only the pond's
-  // screen-density correction so the live fish match the upstream visual scale.
-  const KOI_RENDER_SCALE = .84;
   const rgb = h => [parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 16) / 255, parseInt(h.slice(5, 7), 16) / 255];
 
   // Things above the water in the painted pond (assets/pond.jpg, 1672×941), fitted to the painting's edges:
@@ -67,10 +64,10 @@
   // cloudCover: share of the pond under drifting cloud shadow (1 = overcast); cloudShade: how much a cloud's shadow dims.
   // Caustics, glints, fish highlights and crisp shadows belong to sunlit water only; the renderer takes them away under cloud.
   const LOOKS = {
-    sunny: { sunK: 1, bright: 1.1, sat: 1, tint: [1.02, 1, .96], frogTint: [1.02, .98, .9], caustic: .26, causticTint: [1, .97, .84], glint: 1, glintColor: [1, .96, .84], sky: [.86, .93, .94], skyK: .025, cloudCover: .14, cloudShade: .3, wave: .6, refract: 14, ripple: 9, shade: .3, shadow: .8, vignette: .5, water: [.34, .47, .4], moon: 0, mist: 0 },
-    cloudy: { sunK: .95, bright: 1.06, sat: .9, tint: [1, 1, 1.01], frogTint: [.82, .88, .82], caustic: .22, causticTint: [1, .97, .88], glint: .8, glintColor: [1, .96, .86], sky: [.82, .87, .88], skyK: .05, cloudCover: .56, cloudShade: .46, wave: .7, refract: 14, ripple: 9, shade: .26, shadow: .78, vignette: .55, water: [.35, .46, .42], moon: 0, mist: 0 },
-    rain: { sunK: .4, bright: .9, sat: .66, tint: [.93, .98, 1.04], frogTint: [.56, .65, .68], caustic: .035, causticTint: [.9, .95, 1], glint: .12, glintColor: [.9, .95, 1], sky: [.68, .74, .78], skyK: .13, cloudCover: 1, cloudShade: .08, wave: 1, refract: 15, ripple: 10, shade: .3, shadow: .5, vignette: .65, water: [.3, .39, .38], moon: 0, mist: .1 },
-    snow: { sunK: .55, bright: 1.02, sat: .66, tint: [.99, 1.02, 1.07], frogTint: [.78, .84, .88], caustic: .06, causticTint: [.95, .98, 1], glint: .28, glintColor: [.95, .98, 1], sky: [.9, .93, .96], skyK: .11, cloudCover: .75, cloudShade: .2, wave: .42, refract: 13, ripple: 8, shade: .22, shadow: .5, vignette: .5, water: [.4, .48, .48], moon: 0, mist: .04 }
+    sunny: { sunK: 1, bright: 1.1, sat: 1, tint: [1.02, 1, .96], frogTint: [1.02, .98, .9], animalTint: [1, 1, 1], caustic: .26, causticTint: [1, .97, .84], glint: 1, glintColor: [1, .96, .84], sky: [.86, .93, .94], skyK: .025, cloudCover: .14, cloudShade: .3, wave: .6, refract: 14, ripple: 9, shade: .3, shadow: .8, vignette: .5, water: [.34, .47, .4], moon: 0, mist: 0 },
+    cloudy: { sunK: .95, bright: 1.08, sat: .96, tint: [1.01, 1.01, 1.02], frogTint: [.92, .96, .9], animalTint: [1.05, 1.04, 1.02], caustic: .22, causticTint: [1, .97, .88], glint: .8, glintColor: [1, .96, .86], sky: [.82, .87, .88], skyK: .05, cloudCover: .56, cloudShade: .46, wave: .7, refract: 14, ripple: 9, shade: .26, shadow: .78, vignette: .55, water: [.35, .46, .42], moon: 0, mist: 0 },
+    rain: { sunK: .4, bright: .96, sat: .84, tint: [.98, 1.04, 1.1], frogTint: [.76, .84, .82], animalTint: [1.1, 1.08, 1.05], caustic: .035, causticTint: [.9, .95, 1], glint: .12, glintColor: [.9, .95, 1], sky: [.68, .74, .78], skyK: .13, cloudCover: 1, cloudShade: .08, wave: 1, refract: 15, ripple: 10, shade: .3, shadow: .5, vignette: .65, water: [.3, .39, .38], moon: 0, mist: .1 },
+    snow: { sunK: .55, bright: 1.06, sat: .82, tint: [1.02, 1.06, 1.12], frogTint: [.9, .96, 1], animalTint: [1.08, 1.08, 1.1], caustic: .06, causticTint: [.95, .98, 1], glint: .28, glintColor: [.95, .98, 1], sky: [.9, .93, .96], skyK: .11, cloudCover: .75, cloudShade: .2, wave: .42, refract: 13, ripple: 8, shade: .22, shadow: .5, vignette: .5, water: [.4, .48, .48], moon: 0, mist: .04 }
   };
   function dayPhase(date = new Date()) {
     const h = date && typeof date.getTime === 'function' && !Number.isNaN(date.getTime()) ? date.getHours() + date.getMinutes() / 60 : 12;
@@ -80,15 +77,15 @@
   }
   function lookFor(weather, night, rain = .5, snow = .5, season = '', phase = 'day') {
     const l = JSON.parse(JSON.stringify(LOOKS[weather] || LOOKS.sunny));
-    if (weather === 'rain') Object.assign(l, { bright: .99 - .08 * rain, sat: .78 - .1 * rain, wave: .72 + .55 * rain, skyK: .09 + .07 * rain, mist: .04 + .12 * rain });
-    if (weather === 'snow') Object.assign(l, { bright: .98 + .08 * snow, sat: .72 - .18 * snow, cloudCover: .6 + .4 * snow, skyK: .08 + .09 * snow, caustic: .07 * (1 - snow * .6), wave: .5 - .12 * snow, mist: .02 + .06 * snow });
+    if (weather === 'rain') Object.assign(l, { bright: 1.01 - .06 * rain, sat: .88 - .06 * rain, tint: [.99, 1.04, 1.1], animalTint: [1.1, 1.08, 1.05], wave: .72 + .55 * rain, skyK: .09 + .07 * rain, mist: .04 + .12 * rain });
+    if (weather === 'snow') Object.assign(l, { bright: 1.02 + .06 * snow, sat: .84 - .1 * snow, tint: [1.02, 1.06, 1.12], animalTint: [1.08, 1.08, 1.1], cloudCover: .6 + .4 * snow, skyK: .08 + .09 * snow, caustic: .07 * (1 - snow * .6), wave: .5 - .12 * snow, mist: .02 + .06 * snow });
     if (season === 'spring') { l.bright *= .92; l.sat *= .9; l.tint = [l.tint[0] * 1.02, l.tint[1] * .98, l.tint[2] * .94]; }
     if (season === 'summer') { l.bright *= .94; l.sat *= .84; l.tint = [l.tint[0] * .97, l.tint[1], l.tint[2] * .95]; }
     if (season === 'autumn') { l.bright *= .96; l.sat *= .9; l.tint = [l.tint[0] * 1.05, l.tint[1] * .95, l.tint[2] * .86]; }
     if (season === 'winter') { l.bright *= .98; l.sat *= .76; l.tint = [l.tint[0] * .9, l.tint[1] * .96, l.tint[2] * 1.05]; }
     if (!night && phase === 'blue') { l.bright *= .92; l.sat *= .86; l.tint = [l.tint[0] * .88, l.tint[1] * .95, l.tint[2] * 1.08]; }
     if (!night && phase === 'golden') { l.bright *= 1.01; l.tint = [l.tint[0] * 1.06, l.tint[1] * .98, l.tint[2] * .88]; }
-    if (night) Object.assign(l, { sunK: l.sunK * .45, bright: l.bright * (weather === 'rain' ? .68 : .54), sat: l.sat * .72, frogTint: [.42, .54, .64], tint: [.7, .84, 1.1], caustic: l.caustic * .25, glint: .55, glintColor: [.7, .82, 1], sky: [.22, .3, .44], skyK: l.skyK * 1.3 + .04, wave: l.wave * 1.1, shadow: l.shadow * .35, cloudShade: l.cloudShade * .5, moon: weather === 'rain' ? 1.05 : weather === 'sunny' || weather === 'snow' ? 1.8 : .9, water: [.26, .38, .48], mist: l.mist * .6 });
+    if (night) Object.assign(l, { sunK: l.sunK * .45, bright: l.bright * (weather === 'rain' ? .68 : .54), sat: l.sat * .72, frogTint: [.42, .54, .64], animalTint: [.78, .84, .96], tint: [.7, .84, 1.1], caustic: l.caustic * .25, glint: .55, glintColor: [.7, .82, 1], sky: [.22, .3, .44], skyK: l.skyK * 1.3 + .04, wave: l.wave * 1.1, shadow: l.shadow * .35, cloudShade: l.cloudShade * .5, moon: weather === 'rain' ? 1.05 : weather === 'sunny' || weather === 'snow' ? 1.8 : .9, water: [.26, .38, .48], mist: l.mist * .6 });
     return l;
   }
   // Age of the moon from a known new moon, so the reflection shows tonight's real phase.
@@ -143,13 +140,6 @@
     draw(R, w, h, scale, look) {
       const S = R.sprites, v = this.variant, s = scale * this.size * (1 + (.5 - this.depth) * .08), x = this.x * w, y = this.y * h, a = this.angle, c = Math.cos(a), si = Math.sin(a);
       const fogA = .03 + this.depth * .3, fog = [look.water[0], look.water[1], look.water[2], fogA];
-      if (S.turtleReal) {
-        const bob = Math.sin(this.stroke) * .025, realScale = s * 1.52;
-        const off = (6 + (1 - this.depth) * 26) * scale, dx = look.shadowDir[0] * off, dy = look.shadowDir[1] * off, sh = [0, 0, 0, .82 - (1 - this.depth) * .2], blur = [(1 - this.depth) * 1.1, 0, 0, 0];
-        R.sprite('shadow', S.turtleReal, x + dx, y + dy, a + bob, realScale, realScale, sh, blur);
-        R.sprite('under', S.turtleReal, x, y, a + bob, realScale, realScale, undefined, fog);
-        return;
-      }
       const at = (lx, ly) => [x + (lx * c - ly * si) * s, y + (lx * si + ly * c) * s];
       const off = (6 + (1 - this.depth) * 26) * scale, dx = look.shadowDir[0] * off, dy = look.shadowDir[1] * off, sh = [0, 0, 0, .86 - (1 - this.depth) * .2], blur = [(1 - this.depth) * 1.1, 0, 0, 0];
       const part = (name, lx, ly, ang, flip) => {
@@ -347,10 +337,16 @@
     }
   }
 
-  function frogEligible(season, weather, night) { return !!night || (season === 'summer' && weather === 'cloudy'); }
+  function frogEligible(season, weather, night) { return (season === 'spring' || season === 'summer') && (weather === 'sunny' || weather === 'cloudy' || weather === 'rain'); }
   class Frog {
-    constructor(rnd) { Object.assign(this, { rnd, x: 0, y: 0, state: 'perched', jumpPhase: 'rest', age: 0, swimAge: 0, size: 1.04, phase: rnd() * TAU, angle: -Math.PI / 2, targetAngle: -Math.PI / 2, fromX: 0, fromY: 0, toX: 0, toY: 0 }); }
-    place(x, y) { this.x = x; this.y = y; this.fromX = this.toX = x; this.fromY = this.toY = y; this.state = 'perched'; this.age = 0; this.swimAge = 0; }
+    constructor(rnd) { Object.assign(this, { rnd, x: 0, y: 0, state: 'perched', jumpPhase: 'rest', age: 0, swimAge: 0, size: 0.95, phase: rnd() * TAU, angle: -Math.PI / 2, targetAngle: -Math.PI / 2, fromX: 0, fromY: 0, toX: 0, toY: 0 }); }
+    place(x, y) { this.state = 'perched'; this.setPerch(x, y); this.age = 0; this.swimAge = 0; }
+    setPerch(x, y) {
+      this.perchX = x; this.perchY = y; this.perchVisible = true;
+      if (this.state === 'perched') {
+        this.x = x; this.y = y; this.fromX = this.toX = x; this.fromY = this.toY = y;
+      }
+    }
     faceTarget(x, y) { if (Number.isFinite(x) && Number.isFinite(y) && (x !== this.x || y !== this.y)) this.targetAngle = Math.atan2(y - this.y, x - this.x); }
     jump(targetX = this.x, targetY = this.y) {
       if (this.state !== 'perched') return false;
@@ -359,6 +355,10 @@
     }
     update(dt) {
       if (this.state === 'perched') {
+        if (Number.isFinite(this.perchX) && Number.isFinite(this.perchY)) {
+          this.x = this.perchX; this.y = this.perchY;
+        }
+        this.age += dt;
         const turn = clamp(wrap(this.targetAngle - this.angle), -dt * .06, dt * .06);
         this.angle = wrap(this.angle + turn);
         return false;
@@ -368,7 +368,7 @@
         this.x += Math.cos(this.angle) * 11 * dt;
         this.y += Math.sin(this.angle) * 7 * dt;
         this.angle = wrap(this.angle + Math.sin(this.swimAge * 3 + this.phase) * dt * .18);
-        if (this.swimAge > 1.15) this.state = 'gone';
+        if (this.swimAge >= 5) this.state = 'gone';
         return false;
       }
       if (this.state !== 'jumping') return false;
@@ -377,104 +377,186 @@
       this.angle = wrap(this.angle + clamp(wrap(this.targetAngle - this.angle), -dt * .65, dt * .65));
       if (this.age < launchEnd) {
         this.jumpPhase = 'launch';
+        // Keep the launch on the lily pad. The old 8% interpolation moved
+        // the frog horizontally before the airborne pose was visible, which
+        // read as a short slide instead of a clean jump.
+        const progress = 0;
+        this.x = this.fromX + (this.toX - this.fromX) * progress; this.y = this.fromY + (this.toY - this.fromY) * progress;
       } else if (this.age < airEnd) {
         this.jumpPhase = 'airborne';
-        const t = (this.age - launchEnd) / (airEnd - launchEnd), ease = t * t * (3 - 2 * t);
-        this.x = this.fromX + (this.toX - this.fromX) * ease; this.y = this.fromY + (this.toY - this.fromY) * ease;
+        const t = (this.age - launchEnd) / (airEnd - launchEnd), ease = t * t * (3 - 2 * t), progress = .08 + .74 * ease;
+        this.x = this.fromX + (this.toX - this.fromX) * progress; this.y = this.fromY + (this.toY - this.fromY) * progress;
       } else {
         this.jumpPhase = 'dive';
-        const t = clamp((this.age - airEnd) / (diveEnd - airEnd), 0, 1), ease = t * t * (3 - 2 * t);
-        this.x = this.fromX + (this.toX - this.fromX) * (.98 + .02 * ease); this.y = this.fromY + (this.toY - this.fromY) * (.98 + .02 * ease);
+        const t = clamp((this.age - airEnd) / (diveEnd - airEnd), 0, 1), ease = t * t * (3 - 2 * t), progress = .82 + .18 * ease;
+        this.x = this.fromX + (this.toX - this.fromX) * progress; this.y = this.fromY + (this.toY - this.fromY) * progress;
       }
       if (this.age >= diveEnd) { this.state = 'swimming'; this.jumpPhase = 'rest'; this.swimAge = 0; return 'landed'; }
       return false;
     }
-    draw(R, scale, look) {
-      if (this.state === 'gone') return;
-      const launch = this.state === 'jumping' && this.jumpPhase === 'launch' ? clamp(this.age / .18, 0, 1) : 0;
-      const airborne = this.state === 'jumping' && this.jumpPhase === 'airborne' ? clamp((this.age - .14) / .44, 0, 1) : 0;
-      const dive = this.state === 'jumping' && this.jumpPhase === 'dive' ? clamp((this.age - .58) / .2, 0, 1) : 0;
-      const lift = Math.sin(airborne * Math.PI) * 50 * scale + launch * 3 * scale;
-      const stretch = airborne * (1 - dive) + dive * .15;
-      const s = scale * this.size * (1 + stretch * .12);
-      // Let the weather tint carry the lighting; avoid brightening the frog beyond its surroundings.
-      const tint = look.frogTint || [1, 1, 1], light = look.night ? .78 : clamp(.72 + (look.sunK || 1) * .16, .78, .96), sceneTint = look.tint || [1, 1, 1];
-      const color = [0, 1, 2].map(i => clamp(tint[i] * sceneTint[i] * light, .18, 1.08)).concat(.97);
-      if (this.state === 'swimming') {
-        const fog = [look.water[0], look.water[1], look.water[2], .12];
-        R.sprite('under', R.sprites.frog, this.x, this.y, this.angle + Math.PI / 2, s * .92, s * .92, color, fog);
-        return;
+    draw(R, scale, look, perchDx = 0, perchDy = 0) {
+      if (this.state === 'gone' || (this.state === 'perched' && this.perchVisible === false)) return;
+      const x = this.x + (this.state === 'perched' ? perchDx : 0), y = this.y + (this.state === 'perched' ? perchDy : 0);
+      const S = R.sprites, swimming = this.state === 'swimming', jumping = this.state === 'jumping';
+      const jumpProgress = jumping ? clamp(this.age / .78, 0, 1) : 0;
+      const airborne = jumping ? jumpProgress : 0;
+      const dive = jumping && this.jumpPhase === 'dive' ? clamp((this.age - .58) / .2, 0, 1) : 0;
+      const def = swimming ? S.frogSwim || S.frog : jumping ? (dive > 0 ? S.frogLand || S.frogJump : S.frogJump) || S.frog : S.frog;
+      if (!def) return;
+      // All supplied poses face +X and share a logical width, so pose swaps cannot shrink the frog.
+      // All three supplied poses share one logical footprint. Keeping one
+      // multiplier prevents the frog from visibly growing during pose swaps.
+      const poseScale = jumping && dive > 0 ? .7 : .8;
+      const s = scale * this.size * poseScale, lift = Math.sin(airborne * Math.PI) * 50 * scale;
+      const wobble = !jumping && !swimming ? (Math.sin(this.phase + this.age * .7) + .4 * Math.sin(this.phase * 1.8 + this.age * 1.3)) * .018 : 0;
+      const angle = this.angle + (def.forward === 'x' ? 0 : Math.PI / 2) + wobble;
+      const tint = look.frogTint || [1, 1, 1], light = look.night ? .78 : clamp(.72 + (look.sunK || 1) * .16, .78, .96);
+      const sceneTint = look.tint || [1, 1, 1], alpha = swimming ? .97 * clamp((5 - this.swimAge) / 1.2, 0, 1) : .97;
+        const animalTint = look.animalTint || [1, 1, 1];
+        const color = [0, 1, 2].map(i => clamp(tint[i] * sceneTint[i] * animalTint[i] * light, .18, 1.12)).concat(alpha);
+      if (swimming) {
+        R.sprite('under', def, this.x, this.y, angle, s, s, color, [look.water[0], look.water[1], look.water[2], .12]);
+      } else {
+        R.sprite('airShadow', def, x + look.shadowDir[0] * 12 * scale, y + look.shadowDir[1] * 12 * scale, angle, s, s, [0, 0, 0, .22 * (1 - dive)]);
+        R.sprite('air', def, x, y - lift, angle, s, s, color);
       }
-      const shadowA = .3 * (1 - dive * .8), shadow = [this.x + look.shadowDir[0] * 12 * scale, this.y + look.shadowDir[1] * 12 * scale];
-      if (shadowA > 0) R.sprite('airShadow', R.sprites.frog, shadow[0], shadow[1], 0, s, s * .72, [0, 0, 0, shadowA]);
-      R.sprite('air', R.sprites.frog, this.x, this.y - lift, this.angle + Math.PI / 2 + airborne * .16 - dive * .18, s * 1.12 * (1 + stretch * .06), s * 1.12 * (1 - stretch * .08), color);
     }
   }
 
   function egretEligible(weather, night) { return !night && weather !== 'rain' && weather !== 'snow'; }
   class Egret {
-    constructor(rnd) { Object.assign(this, { rnd, x: -100, y: 0, fromX: -100, fromY: 0, targetX: 0, targetY: 0, state: 'hidden', age: 0, restAge: 0, wadeAge: 0, react: 0, disturbCooldown: 0, ripple: 0, size: 2.44, action: 'idle', actionAge: 0, actionDuration: 0, nextAction: 4 + rnd() * 5, actionIndex: 0 }); }
-    place(x, y, fromX = -110, fromY = y - 90) { this.targetX = x; this.targetY = y; this.fromX = fromX; this.fromY = fromY; this.x = fromX; this.y = fromY; this.heading = Math.atan2(y - fromY, x - fromX); this.state = 'flying'; this.age = 0; this.restAge = 0; this.wadeAge = 0; this.react = 0; this.disturbCooldown = 0; this.ripple = .8; this.action = 'idle'; this.actionAge = 0; this.nextAction = 4 + this.rnd() * 5; }
-    takeOff() { if (this.state === 'resting') { this.state = 'leaving'; this.age = 0; this.heading = .12; return true; } return false; }
-    tickAction(dt) {
-      this.actionAge += dt; this.nextAction -= dt;
-      if (this.action !== 'idle' && this.actionAge >= this.actionDuration) this.action = 'idle';
-      if (this.nextAction > 0) return;
-      const actions = ['probe', 'wing', 'preen', 'idle'];
-      this.action = actions[this.actionIndex++ % actions.length]; this.actionAge = 0;
-      this.actionDuration = this.action === 'idle' ? .6 : .7 + this.rnd() * .7;
-      this.nextAction = 3.5 + this.rnd() * 5.5;
+    constructor(rnd) {
+      Object.assign(this, { rnd, x: -100, y: 0, state: 'hidden', age: 0, heading: 0,
+        // The supplied 2560px PNG is a full-canvas export.  Its logical size
+        // is deliberately kept close to an adult koi instead of the old
+        // procedural bird's 1.44 multiplier.
+        // Keep the egret visibly close to the reference koi scale while still
+        // preserving the slender bird silhouette: +0.3x from the prior 1.05.
+        size: 1.365, ripple: 0, fishCooldown: 0, clickCount: 0, clickWindow: 0, escapeTime: 0 });
+    }
+    place(x, y, fromX = -110, fromY = y - 90) {
+      Object.assign(this, { x: fromX, y: fromY, fromX, fromY, targetX: x, targetY: y,
+        homeX: x, homeY: y, state: 'flying', age: 0, visitAge: 0, visitDuration: 28 + this.rnd() * 22,
+        heading: Math.atan2(y - fromY, x - fromX), ripple: 0, fishCooldown: 0,
+        clickCount: 0, clickWindow: 0, escapeTime: 0, swimTarget: null });
+    }
+    forwardSwimTarget(scale, distance = 115) {
+      const angle = this.heading + (this.rnd() - .5) * .42;
+      const length = distance * scale * (.9 + this.rnd() * .2);
+      return [this.x + Math.cos(angle) * length, this.y + Math.sin(angle) * length];
+    }
+    safeSwimTarget(scene, scale, distance = 115) {
+      const base = this.heading;
+      const limit = Math.max(190 * scale, distance * 1.35);
+      for (let i = 0; i < 16; i++) {
+        const spread = i < 5 ? .75 : 2.6;
+        const angle = base + (this.rnd() - .5) * spread;
+        const length = distance * scale * (.88 + this.rnd() * .24);
+        const x = this.x + Math.cos(angle) * length, y = this.y + Math.sin(angle) * length;
+        if (scene.isOpenWater(x, y, 14 * scale) && Math.hypot(x - this.homeX, y - this.homeY) <= limit) return [x, y];
+      }
+      for (const offset of [.9, -.9, Math.PI]) {
+        const length = Math.min(distance, 90) * scale;
+        const x = this.x + Math.cos(base + offset) * length, y = this.y + Math.sin(base + offset) * length;
+        if (scene.isOpenWater(x, y, 14 * scale)) return [x, y];
+      }
+      return [this.x, this.y];
+    }
+    takeOff() {
+      if (this.state !== 'swimming') return false;
+      this.state = 'leaving'; this.age = 0; this.exitTarget = null; return true;
+    }
+    clicked(scene) {
+      if (this.state !== 'swimming') return false;
+      this.clickCount = this.clickWindow > 0 ? this.clickCount + 1 : 1;
+      this.clickWindow = 5;
+      scene.drop(this.x, this.y, 9 * scene.scale, .4);
+      scene.splash(this.x, this.y, .72, false);
+      if (this.clickCount >= 4) {
+        this.takeOff(); scene.drop(this.x, this.y, 14 * scene.scale, .65);
+        scene.events.push({ type: 'egret-flight', x: this.x, y: this.y });
+      } else {
+        this.escapeTime = 3.2;
+        this.swimTarget = this.safeSwimTarget(scene, scene.scale, 165);
+      }
+      return true;
     }
     update(dt, w, h, scale, scene) {
-      if (this.state === 'hidden') return false;
+      if (this.state === 'hidden' || this.state === 'gone') return false;
+      this.age += dt;
       if (this.state === 'flying') {
-        this.age += dt; const t = clamp(this.age / 3.6, 0, 1), ease = t * t * (3 - 2 * t);
-        this.x = this.fromX + (this.targetX - this.fromX) * ease; this.y = this.fromY + (this.targetY - this.fromY) * ease - Math.sin(t * Math.PI) * 34 * scale;
-        if (t >= 1) { this.state = 'wading'; this.age = 0; this.wadeAge = 0; this.restAge = 0; this.ripple = 0; scene.drop(this.x, this.y, 9 * scale, .25); scene.splash(this.x, this.y, .65, false); scene.sim.scare(this.x, this.y, 240 * scale); return 'landed'; }
-        return false;
-      }
-      if (this.state === 'wading') {
-        this.age += dt; this.wadeAge += dt; this.react = Math.max(0, this.react - dt); this.disturbCooldown = Math.max(0, this.disturbCooldown - dt); this.ripple -= dt; this.tickAction(dt);
-        const fish = scene.nearestFish(this.x, this.y);
-        if (fish) {
-          const wanted = Math.atan2(fish[1] - this.y, fish[0] - this.x);
-          this.heading = wrap(this.heading + clamp(wrap(wanted - this.heading), -.32 * dt, .32 * dt));
+        const t = clamp(this.age / 3.6, 0, 1), u = t * t * (3 - 2 * t), du = 6 * t * (1 - t) / 3.6;
+        this.x = this.fromX + (this.targetX - this.fromX) * u;
+        this.y = this.fromY + (this.targetY - this.fromY) * u - Math.sin(t * Math.PI) ** 2 * 28 * scale;
+        const vx = (this.targetX - this.fromX) * du;
+        const vy = (this.targetY - this.fromY) * du - Math.sin(2 * t * Math.PI) * Math.PI * 28 * scale / 3.6;
+        if (Math.hypot(vx, vy) > .01 && t < .995) this.heading = Math.atan2(vy, vx);
+        if (t >= 1) {
+          this.state = 'swimming'; this.age = 0; this.swimTarget = null; this.ripple = .4;
+          this.swimTarget = this.safeSwimTarget(scene, scale);
+          scene.drop(this.x, this.y, 9 * scale, .3); scene.splash(this.x, this.y, .6, false);
+          return 'landed';
         }
-        this.x += Math.cos(this.heading) * 32 * scale * dt;
-        this.y += Math.sin(this.heading) * 16 * scale * dt;
-        if (this.ripple <= 0) { scene.drop(this.x, this.y, 2.8 * scale, .08); scene.splash(this.x, this.y, .48, false); scene.sim.scare(this.x, this.y, 190 * scale); this.ripple = .55 + this.rnd() * .35; }
-        if (this.wadeAge >= 2.4) { this.state = 'resting'; this.age = 0; this.restAge = 0; this.ripple = .8; }
         return false;
       }
-      if (this.state === 'resting') {
-        this.age += dt; this.restAge += dt; this.react = Math.max(0, this.react - dt); this.disturbCooldown = Math.max(0, this.disturbCooldown - dt); this.ripple -= dt; this.tickAction(dt);
-        const fish = scene.nearestFish(this.x, this.y);
-        if (fish) this.heading = wrap(this.heading + clamp(wrap(Math.atan2(fish[1] - this.y, fish[0] - this.x) - this.heading), -.2 * dt, .2 * dt));
-        if (this.ripple <= 0) { scene.drop(this.x, this.y, 2.8 * scale, .08); scene.splash(this.x, this.y, .42, false); scene.sim.scare(this.x, this.y, 180 * scale); this.ripple = 1.8 + this.rnd() * 1.5; }
-        if (this.restAge > 18 + this.rnd() * 18) { this.state = 'leaving'; this.age = 0; this.heading = .1; }
+      if (this.state === 'swimming') {
+        this.visitAge += dt; this.clickWindow = Math.max(0, this.clickWindow - dt);
+        this.escapeTime = Math.max(0, this.escapeTime - dt); this.fishCooldown -= dt; this.ripple -= dt;
+        if (this.visitAge >= this.visitDuration) { this.takeOff(); return false; }
+        if (!this.swimTarget || Math.hypot(this.swimTarget[0] - this.x, this.swimTarget[1] - this.y) < 12 * scale) {
+          this.swimTarget = this.safeSwimTarget(scene, scale, 110);
+        }
+        const dx = this.swimTarget[0] - this.x, dy = this.swimTarget[1] - this.y, distance = Math.hypot(dx, dy);
+        if (distance > 2 * scale) {
+          const wanted = Math.atan2(dy, dx), limit = (this.escapeTime > 0 ? .3 : .11) * dt;
+          this.heading = wrap(this.heading + clamp(wrap(wanted - this.heading), -limit, limit));
+          const speed = (this.escapeTime > 0 ? 26 : 10) * scale * clamp(distance / (18 * scale), .25, 1);
+          const nx = this.x + Math.cos(this.heading) * speed * dt, ny = this.y + Math.sin(this.heading) * speed * dt;
+          if (scene.isOpenWater(nx, ny, 12 * scale) && Math.hypot(nx - this.homeX, ny - this.homeY) <= (this.escapeTime > 0 ? 250 : 190) * scale) {
+            this.x = nx; this.y = ny;
+          } else {
+            this.swimTarget = this.safeSwimTarget(scene, scale, this.escapeTime > 0 ? 165 : 105);
+            const nextHeading = Math.atan2(this.swimTarget[1] - this.y, this.swimTarget[0] - this.x);
+            this.heading = wrap(this.heading + clamp(wrap(nextHeading - this.heading), -.28, .28));
+          }
+        }
+        if (this.ripple <= 0) {
+          const wakeX = this.x - Math.cos(this.heading) * 24 * scale, wakeY = this.y - Math.sin(this.heading) * 24 * scale;
+          scene.drop(wakeX, wakeY, 3 * scale, .075); scene.splash(wakeX, wakeY, .16, false);
+          this.ripple = .85 + this.rnd() * .65;
+        }
+        if (this.fishCooldown <= 0) {
+          const fish = scene.nearestFish(this.x, this.y);
+          if (fish && Math.hypot(fish[0] - this.x, fish[1] - this.y) < 55 * scale) {
+            scene.sim.scare(this.x, this.y, 60 * scale); this.fishCooldown = 1.8;
+          }
+        }
         return false;
       }
       if (this.state === 'leaving') {
-        this.age += dt; this.react = Math.max(0, this.react - dt); this.x += (300 + this.age * 80) * scale * dt; this.y -= 28 * scale * dt;
-        if (this.x > w + 130 || this.age > 6.5) this.state = 'gone';
+        if (!this.exitTarget) this.exitTarget = [w + 150 * scale, this.y + (this.rnd() - .5) * 12 * scale];
+        const wanted = Math.atan2(this.exitTarget[1] - this.y, this.exitTarget[0] - this.x);
+        this.heading = wrap(this.heading + clamp(wrap(wanted - this.heading), -dt * .95, dt * .95));
+        const speed = (70 + Math.min(this.age, 3) * 65) * scale;
+        this.x += Math.cos(this.heading) * speed * dt; this.y += Math.sin(this.heading) * speed * dt;
+        if (this.x > w + 110 * scale) this.state = 'gone';
       }
       return false;
     }
     draw(R, scale, look) {
       if (this.state === 'hidden' || this.state === 'gone') return;
-      const flight = this.state === 'flying' || this.state === 'leaving', def = flight ? R.sprites.egretFlight : R.sprites.egretRest;
+      const flying = this.state === 'flying' || this.state === 'leaving';
+      const def = flying ? R.sprites.egretFlight : R.sprites.egretRest;
       if (!def) return;
-      const reacting = clamp(this.react / .7, 0, 1), wading = this.state === 'wading';
-      const actionT = this.actionDuration ? clamp(this.actionAge / this.actionDuration, 0, 1) : 0;
-      const actionWave = Math.sin(actionT * Math.PI);
-      const probe = !flight && this.action === 'probe' ? actionWave : 0, wing = !flight && this.action === 'wing' ? actionWave : 0, preen = !flight && this.action === 'preen' ? actionWave : 0;
-      const bob = flight ? 0 : (Math.sin(this.age * 1.7) * 1.4 + (wading ? Math.sin(this.wadeAge * 8) * 1.8 : 0) + reacting * Math.sin(this.age * 30) * 1.6 - probe * 4 + preen * 1.5) * scale;
-      const flap = flight ? 1 + Math.sin(this.age * 14) * .06 : 1 + reacting * Math.sin(this.age * 26) * .08 + wing * .1;
-      const s = scale * 1.08 * this.size, angle = flight ? this.heading : Math.sin(this.age * .7) * .025;
-      const shadowA = flight ? .18 : .34, off = (7 + (flight ? 16 : 4)) * scale;
-      if (!look.night) R.sprite('shadow', def, this.x + look.shadowDir[0] * off, this.y + look.shadowDir[1] * off + 4 * scale, angle, s, s * .72, [0, 0, 0, shadowA]);
-      const facing = flight ? this.heading : this.heading + Math.sin(this.age * .7) * .025 + reacting * Math.sin(this.age * 18) * .16 + probe * .08 - preen * .06;
-      R.sprite(flight ? 'air' : 'surface', def, this.x, this.y + bob, facing, s * flap, s * (1 + probe * .04), [look.bright * look.tint[0], look.bright * look.tint[1], look.bright * look.tint[2], .96]);
+      // The flight silhouette needs a little more presence than the water pose.
+      const s = scale * this.size * (flying ? 1.2 : 1.1), bob = flying ? 0 : Math.sin(this.age * 1.8) * .65 * scale;
+      const flap = flying ? 1 + Math.sin(this.age * 7) * .045 : 1;
+      const off = (flying ? 26 : 7) * scale;
+      R.sprite(flying ? 'airShadow' : 'shadow', def, this.x + look.shadowDir[0] * off, this.y + look.shadowDir[1] * off,
+        this.heading, s, s * (flying ? .75 : .88), [0, 0, 0, flying ? .16 : .18]);
+        const animalTint = look.animalTint || [1, 1, 1];
+        R.sprite(flying ? 'air' : 'surface', def, this.x, this.y + bob, this.heading, s, s * flap,
+        [look.bright * look.tint[0] * animalTint[0], look.bright * look.tint[1] * animalTint[1], look.bright * look.tint[2] * animalTint[2], .97]);
     }
   }
 
@@ -527,19 +609,78 @@
       return best || [centerX, centerY];
     }
     spawnTadpoles(x, y) {
-      this.tadpoles = Array.from({ length: 10 }, (_, i) => ({ x: x + (this.rnd() - .5) * 30 * this.scale, y: y + (this.rnd() - .5) * 22 * this.scale, vx: 0, vy: 0, phase: this.rnd() * TAU, alpha: 1, age: i * .08 }));
+      const a = Math.atan2(this.h / 2 - y, this.w / 2 - x);
+      const turtleHomes = (this.turtles || []).map(t => [t.x * this.w, t.y * this.h]);
+      const safe = p => Math.hypot(p[0] - x, p[1] - y) > 125 * this.scale &&
+        turtleHomes.every(([tx, ty]) => Math.hypot(p[0] - tx, p[1] - ty) > 115 * this.scale);
+      let center = null;
+      for (let i = 0; i < 48 && !center; i++) {
+        const angle = a + (this.rnd() - .5) * 1.8;
+        const distance = (150 + this.rnd() * 85) * this.scale;
+        const candidate = this.openWaterPoint(x + Math.cos(angle) * distance, y + Math.sin(angle) * distance, 55 * this.scale);
+        if (safe(candidate)) center = candidate;
+      }
+      if (!center) {
+        const candidates = [
+          [this.w * .5, this.h * .5], [this.w * .28, this.h * .32], [this.w * .72, this.h * .32],
+          [this.w * .28, this.h * .68], [this.w * .72, this.h * .68]
+        ];
+        center = candidates.map(p => this.openWaterPoint(p[0], p[1], 35 * this.scale)).find(safe) || [this.w * .5, this.h * .5];
+      }
+      this.tadpoleGroup = { x: center[0], y: center[1], target: center, mode: 'visit', timer: 7 + this.rnd() * 7, goneAge: 0 };
+      this.tadpoles = Array.from({ length: 14 }, (_, i) => {
+        let p = center;
+        for (let j = 0; j < 12; j++) {
+          const candidate = this.openWaterPoint(center[0], center[1], 25 * this.scale);
+          if (safe(candidate)) { p = candidate; break; }
+        }
+        return { x: p[0], y: p[1], vx: 0, vy: 0, heading: a, phase: this.rnd() * TAU,
+          ox: (this.rnd() - .5) * 38 * this.scale, oy: (this.rnd() - .5) * 32 * this.scale,
+          alpha: 1, age: i * .08 };
+      });
     }
     updateTadpoles(dt, frog) {
-      if (!Array.isArray(this.tadpoles)) return;
-      const target = frog && frog.state !== 'gone' ? frog : null;
+      if (!this.tadpoles || !this.tadpoles.length || !this.tadpoleGroup) return;
+      const g = this.tadpoleGroup, active = frog && frog.state !== 'gone';
+      g.timer -= dt;
+      if (active) {
+        g.goneAge = 0;
+        if (g.timer <= 0) {
+          g.mode = g.mode === 'visit' ? 'roam' : 'visit';
+          g.timer = 7 + this.rnd() * 9;
+          if (g.mode === 'visit') {
+            const a = Math.atan2(this.h / 2 - frog.y, this.w / 2 - frog.x);
+            g.target = this.openWaterPoint(frog.x + Math.cos(a) * 95 * this.scale, frog.y + Math.sin(a) * 95 * this.scale, 25 * this.scale);
+          } else g.target = this.openWaterPoint(this.w * (.3 + this.rnd() * .4), this.h * (.3 + this.rnd() * .4), 65 * this.scale);
+        }
+      } else {
+        g.goneAge += dt;
+        if (g.goneAge >= 15 && g.mode !== 'hide') {
+          g.mode = 'hide';
+          const spots = this.lotusSpots.length ? this.lotusSpots : [[this.w / 2, this.h / 2]];
+          g.target = spots[Math.floor(this.rnd() * spots.length)];
+        } else if (g.mode !== 'hide' && g.timer <= 0) {
+          g.timer = 5 + this.rnd() * 5;
+          g.target = this.openWaterPoint(this.w / 2, this.h / 2, Math.min(this.w, this.h) * .22);
+        }
+      }
+      const dx = g.target[0] - g.x, dy = g.target[1] - g.y, distance = Math.hypot(dx, dy);
+      const speed = Math.min(distance * .6, (g.mode === 'visit' ? 26 : 32) * this.scale);
+      const nx = g.x + dx / (distance || 1) * speed * dt, ny = g.y + dy / (distance || 1) * speed * dt;
+      if (g.mode === 'hide' || this.isOpenWater(nx, ny, 10 * this.scale)) { g.x = nx; g.y = ny; }
+      else g.target = this.openWaterPoint(g.x, g.y, 80 * this.scale);
       for (const t of this.tadpoles) {
         t.age += dt;
-        if (!target) t.alpha = Math.max(0, t.alpha - dt * .55);
-        const tx = target ? target.x : t.x + Math.cos(t.phase + t.age) * 8 * this.scale;
-        const ty = target ? target.y : t.y + Math.sin(t.phase + t.age * .8) * 8 * this.scale;
-        t.vx += (tx - t.x) * dt * (target ? 1.6 : .5); t.vy += (ty - t.y) * dt * (target ? 1.6 : .5);
-        const damp = Math.exp(-dt * 2.4); t.vx *= damp; t.vy *= damp;
-        t.x += t.vx * dt; t.y += t.vy * dt;
+        const tx = g.x + t.ox + Math.sin(t.age * .8 + t.phase) * 5 * this.scale;
+        const ty = g.y + t.oy + Math.cos(t.age * .65 + t.phase) * 4 * this.scale;
+        const dx = tx - t.x, dy = ty - t.y, d = Math.hypot(dx, dy), sp = Math.min(d * 1.3, 36 * this.scale);
+        const k = 1 - Math.exp(-dt * 2.5);
+        t.vx += (dx / (d || 1) * sp - t.vx) * k; t.vy += (dy / (d || 1) * sp - t.vy) * k;
+        const nx = t.x + t.vx * dt, ny = t.y + t.vy * dt;
+        if (g.mode === 'hide' || this.isOpenWater(nx, ny, 5 * this.scale)) { t.x = nx; t.y = ny; }
+        else { t.ox *= -.5; t.oy *= -.5; t.vx *= -.3; t.vy *= -.3; }
+        if (Math.hypot(t.vx, t.vy) > .5) t.heading = wrap(t.heading + clamp(wrap(Math.atan2(t.vy, t.vx) - t.heading), -dt * 2, dt * 2));
+        if (g.mode === 'hide' && (distance < 35 * this.scale || g.goneAge > 28)) t.alpha = Math.max(0, t.alpha - dt * .65);
       }
       this.tadpoles = this.tadpoles.filter(t => t.alpha > .02);
     }
@@ -558,19 +699,32 @@
       return true;
     }
     hitEgret(x, y) {
-      const e = this.egret; if (!e || e.state !== 'resting' || Math.hypot(e.x - x, e.y - y) > 58 * this.scale) return false;
-      if (e.takeOff()) { this.drop(e.x, e.y, 10 * this.scale, .3); this.splash(e.x, e.y, .7, false); this.startle(e.x, e.y); this.sim.scare(e.x, e.y, 260 * this.scale); this.events.push({ type: 'egret-flight', x: e.x, y: e.y }); }
+      const e = this.egret;
+      if (!e || e.state !== 'swimming') return false;
+      const dx = x - e.x, dy = y - e.y, c = Math.cos(e.heading), s = Math.sin(e.heading);
+      const lx = dx * c + dy * s, ly = -dx * s + dy * c;
+      const size = this.scale * e.size;
+      // Match the visible rest-pose footprint, not only its narrow centerline.
+      // This keeps a body click from falling through into feedAt().
+      if ((lx / (58 * size)) ** 2 + (ly / (30 * size)) ** 2 > 1) return false;
+      return e.clicked(this);
+    }
+    disturbEgret(x, y, click = false) { return click ? this.hitEgret(x, y) : false; }
+    isOpenWater(x, y, margin = 0) {
+      if (x < 20 + margin || y < 20 + margin || x > this.w - 20 - margin || y > this.h - 20 - margin) return false;
+      for (const z of this.waterZones || []) {
+        const dx = x - z.x, dy = y - z.y, c = Math.cos(z.angle), s = Math.sin(z.angle);
+        if (((dx * c + dy * s) / (z.rx + margin)) ** 2 + ((-dx * s + dy * c) / (z.ry + margin)) ** 2 <= 1) return false;
+      }
       return true;
     }
-    disturbEgret(x, y) {
-      const e = this.egret;
-      if (!e || (e.state !== 'resting' && e.state !== 'wading') || e.disturbCooldown > 0 || Math.hypot(e.x - x, e.y - y) > 150 * this.scale) return false;
-      e.react = .7; e.ripple = Math.min(e.ripple, 0);
-      e.disturbCooldown = .28;
-      e.heading += clamp(wrap(Math.atan2(y - e.y, x - e.x) - e.heading), -.25, .25) * .18;
-      this.splash(e.x, e.y, .28, false); this.sim.scare(e.x, e.y, 150 * this.scale);
-      this.events.push({ type: 'egret-disturb', x: e.x, y: e.y });
-      return true;
+    openWaterPoint(x, y, radius, rnd = this.rnd) {
+      for (let i = 0; i < 24; i++) {
+        const a = rnd() * TAU, r = radius * (.35 + rnd() * .65), nx = x + Math.cos(a) * r, ny = y + Math.sin(a) * r;
+        if (this.isOpenWater(nx, ny, 14 * this.scale)) return [nx, ny];
+      }
+      if (this.isOpenWater(x, y, 14 * this.scale)) return [x, y];
+      return [this.w / 2, this.h / 2];
     }
     hitLeaf(x, y) {
       const zone = this.surfaceZones.find(z => z.kind === 'l' && Math.hypot(x - z.x, y - z.y) <= z.r);
@@ -602,14 +756,29 @@
       const R = this.R, inside = ([x, y]) => x > 20 && x < w - 20 && y > 20 && y < h - 20;
       const [x0, y0] = R.imageToScreen(0, 0), [x1, y1] = R.imageToScreen(1, 0), k = Math.hypot(x1 - x0, y1 - y0);
       this.spots = this.floatObjects.filter(o => o.kind !== 'rock' && o.rx > 25).map(o => R.imageToScreen(o.x, o.y)).filter(inside);
-      this.lotusSpots = LOTUS.map(o => R.imageToScreen(o.x, o.y)).filter(inside);
+      this.lotusPerches = LOTUS.map(object => ({ object, point: R.imageToScreen(object.x, object.y) })).filter(({ point }) => inside(point));
+      this.lotusSpots = this.lotusPerches.map(perch => perch.point);
+      // Keep resting frogs attached to painting objects when the viewport crops or resizes.
+      if (this.frog && this.frog.state === 'perched') {
+        const frog = this.frog;
+        const perch = this.lotusPerches.find(p => p.object === frog.perchObject) ||
+          this.lotusPerches.reduce((best, p) => !best || Math.hypot(p.point[0] - frog.x, p.point[1] - frog.y) < Math.hypot(best.point[0] - frog.x, best.point[1] - frog.y) ? p : best, null);
+        frog.perchVisible = !!perch;
+        if (perch) { frog.perchObject = perch.object; frog.setPerch(...perch.point); }
+      }
       const open = this.floatObjects.filter(o => o.kind === 'leaf' || o.kind === 'rock').map(o => {
         const [x, y] = R.imageToScreen(o.x, o.y); return { x, y, r: Math.max(o.rx, o.ry) * k };
       });
+      this.waterZones = this.floatObjects.filter(o => o.kind !== 'pennywort').map(o => {
+        const [x, y] = R.imageToScreen(o.x, o.y);
+        return { x, y, rx: o.rx * k, ry: o.ry * k, angle: o.rotation || 0 };
+      });
       this.egretSpots = [];
-      for (let i = 0; i < 28; i++) {
-        const x = w * (.22 + this.rnd() * .56), y = h * (.12 + this.rnd() * .76);
-        if (open.every(o => Math.hypot(o.x - x, o.y - y) > o.r * .9)) this.egretSpots.push([x, y]);
+      // Sample open water throughout the pond interior, not only along the rim.
+      for (let tries = 0; tries < 480 && this.egretSpots.length < 48; tries++) {
+        const x = w * (.12 + this.rnd() * .76), y = h * (.12 + this.rnd() * .76);
+        const spaced = this.egretSpots.every(p => Math.hypot(p[0] - x, p[1] - y) > Math.min(w, h) * .075);
+        if (spaced && this.isOpenWater(x, y, 22 * this.scale)) this.egretSpots.push([x, y]);
       }
       this.buds = this.floatObjects.filter(o => o.kind === 'bud').map(o => R.imageToScreen(o.x - Math.sin(o.rotation) * o.ry * .7, o.y - Math.cos(o.rotation) * o.ry * .7)).filter(inside);
       for (const d of this.dragonflies) { d.x = -1; d.state = 'hover'; d.timer = 1; }
@@ -675,11 +844,13 @@
       if (settings.frogEnabled !== false && frogEligible(season, weather, night)) {
         if (!this.frog) {
           this.frogCooldown -= dt;
-          if (this.frogCooldown <= 0 && this.lotusSpots.length && rnd() < dt * .16) {
-            const p = this.lotusSpots[Math.floor(rnd() * this.lotusSpots.length)]; this.frog = new Frog(rnd); this.frog.place(p[0], p[1]); const target = this.frogTarget(p[0], p[1]); this.frog.faceTarget(target[0], target[1]); this.spawnTadpoles(p[0], p[1]);
+          if (this.frogCooldown <= 0 && this.lotusSpots.length) {
+            const perch = this.lotusPerches[Math.floor(rnd() * this.lotusPerches.length)], p = perch.point;
+            this.frog = new Frog(rnd); this.frog.perchObject = perch.object; this.frog.place(...p);
+            this.frog.faceTarget(w / 2, h / 2); this.frog.angle = this.frog.targetAngle; this.spawnTadpoles(...p);
           }
         } else {
-          if (this.frog.state === 'perched') { const target = this.frogTarget(this.frog.x, this.frog.y); if (target && typeof this.frog.faceTarget === 'function') this.frog.faceTarget(target[0], target[1]); }
+          if (this.frog.state === 'perched') this.frog.faceTarget(w / 2, h / 2);
           const landed = typeof this.frog.update === 'function' ? this.frog.update(dt) : false;
           if (landed === 'landed') { this.drop(this.frog.x, this.frog.y, 18 * scale, .9); this.splash(this.frog.x, this.frog.y, 1.9, false); this.startle(this.frog.x, this.frog.y); this.sim.scare(this.frog.x, this.frog.y, 360 * scale); }
           if (this.frog.state === 'gone') { this.frog = null; this.frogCooldown = 10 + rnd() * 12; }
@@ -776,13 +947,8 @@
       return f.light;
     }
     koi(f, cell) {
-      const R = this.R, look = this.look, sourceSize = f.visualSize || fishRenderSize(f, this.scale), s = sourceSize * KOI_RENDER_SCALE, cx = f.x * this.w, cy = f.y * this.h;
-      // Scale the already simulated spine around the head so movement and
-      // collision units stay unchanged while the visible fish returns to the
-      // upstream proportion.
-      const spine = new Float32Array(f.spine.length), hx = f.spine[0], hy = f.spine[1];
-      for (let i = 0; i < f.spine.length; i += 2) { spine[i] = hx + (f.spine[i] - hx) * KOI_RENDER_SCALE; spine[i + 1] = hy + (f.spine[i + 1] - hy) * KOI_RENDER_SCALE; }
-      const pose = fishPose({ ...f, spine }, s, this.pose);
+      const R = this.R, look = this.look, sourceSize = f.visualSize || fishRenderSize(f, this.scale), s = sourceSize, cx = f.x * this.w, cy = f.y * this.h;
+      const pose = fishPose(f, s, this.pose);
       // Keep deep fish atmospheric without washing the koi body into a translucent grey.
       const k = 1 - f.depth * .09, fogA = .015 + f.depth * .16, fog = [look.water[0], look.water[1], look.water[2], fogA];
       // The shadow lies on the bed: a fish near the bottom casts a dark, sharp one right beside it;
@@ -790,7 +956,9 @@
       const off = (6 + (1 - f.depth) * 30) * this.scale, dx = look.shadowDir[0] * off, dy = look.shadowDir[1] * off, sh = [0, 0, 0, .92 - (1 - f.depth) * .22], blur = [(1 - f.depth) * 1.1, 0, 0, 0];
       // Pectoral fins spread when gliding or braking, fold back at speed, the inner one flares in a turn.
       const L = BODY.length * s, bl = f.v / L, pal = fishPalette(f), slender = pal.kind === 'silvercarp', finDef = R.sprites[pal.kind === 'utsuri' ? 'finMoto' : 'fin'];
-      const tint = pal.kind === 'utsuri' ? [1, 1, 1, .92] : f.species === 'silvercarp' ? [...rgb(pal.fin), .85] : this.finTint[f.palette];
+      const animalTint = look.animalTint || [1, 1, 1];
+      const finBase = pal.kind === 'utsuri' ? [1, 1, 1, .92] : f.species === 'silvercarp' ? [...rgb(pal.fin), .85] : this.finTint[f.palette];
+      const tint = [finBase[0] * animalTint[0], finBase[1] * animalTint[1], finBase[2] * animalTint[2], finBase[3]];
       const base = 1.05 - .6 * clamp(bl / 1.4, 0, 1) + (f.thrust < .3 ? Math.sin(this.time * 4.2 + f.seed) * .16 : 0);
       const fins = [[4, .95, 1], [8, .55, .58]];
       for (const [i, spreadK, size] of fins) {
@@ -803,7 +971,7 @@
         }
       }
       R.fish('shadow', cell, pose, s, cx, cy, k, sh, blur, dx, dy);
-      R.fish('under', cell, pose, s, cx, cy, k, undefined, fog, 0, 0, this.bodyLight(f));
+      R.fish('under', cell, pose, s, cx, cy, k, [...animalTint, 1], fog, 0, 0, this.bodyLight(f));
     }
     draw(settings) {
       const R = this.R, look = this.look, { w, h, scale } = this, sim = this.sim;
@@ -813,9 +981,11 @@
       items.sort((a, b) => b.d - a.d);
       for (const it of items) { if (it.t) it.t.draw(R, w, h, scale, look); else if (it.f.spriteReady && it.f.spine) this.koi(it.f, it.i); }
       if (this.tadpoles) for (const t of this.tadpoles) {
-        const a = t.alpha * .72, s = scale * .22, tail = Math.sin(t.age * 7 + t.phase) * .14;
-        R.sprite('under', R.sprites.dot, t.x, t.y, tail, s * .7, s * 1.25, [.05, .12, .1, a]);
-        R.sprite('under', R.sprites.dot, t.x - Math.cos(t.phase) * s * 1.3, t.y - Math.sin(t.phase) * s * 1.3, tail, s * .18, s * .8, [.08, .2, .16, a * .7]);
+        const frames = R.sprites.tadpoleFrames || [], def = frames[Math.floor(t.age * 5 + t.phase) % frames.length];
+        if (!def) continue;
+        const s = scale * .264;
+        const animalTint = look.animalTint || [1, 1, 1];
+        R.sprite('under', def, t.x, t.y, t.heading, s, s, [.45 * animalTint[0], .48 * animalTint[1], .45 * animalTint[2], t.alpha * .94], [look.water[0], look.water[1], look.water[2], .035]);
       }
       // Leaves bob, pennywort and buds sway on their stalks, flowers nod; wind and rain stir them a little more.
       const t = this.time, gust = .8 + look.wave * .45;
@@ -831,7 +1001,10 @@
         const wetKind = object.kind === 'flower' ? .18 : object.kind === 'bud' ? .35 : 1;
         R.floater(x, y, rx * gr, ry * gr, rot, angle + fl.ja, fl.dx, fl.dy, (big ? 1.8 : stemmed ? 1.2 : 2.6) * scale, big ? 1 : .6, wetKind, big ? 1 : 0, fl.seed);
       }
-      if (this.frog) this.frog.draw(R, scale, look);
+      if (this.frog) {
+        const leaf = this.frog.state === 'perched' ? this.floaters.find(fl => fl.object === this.frog.perchObject) : null;
+        this.frog.draw(R, scale, look, leaf ? leaf.dx : 0, leaf ? leaf.dy : 0);
+      }
       if (this.egret) this.egret.draw(R, scale, look);
       // Floating: petals and food.
       for (const p of this.petals) {

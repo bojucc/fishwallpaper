@@ -29,6 +29,6 @@
   <!-- The pond itself: the same web files as every other build, served to WebView2 from a web\ folder. -->
   <ItemGroup>
     <Content Include="..\..\index.html;..\..\style.css;..\..\core.js;..\..\art.js;..\..\gl.js;..\..\scene.js;..\..\audio.js;..\..\app.js" Link="web\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="..\..\assets\pond.jpg;..\..\assets\pondchun.png;..\..\assets\pondxia.png;..\..\assets\pondqiu.png;..\..\assets\ponddong.png;..\..\assets\pondchun-foreground.png;..\..\assets\pondxia-foreground.png;..\..\assets\pondqiu-foreground.png;..\..\assets\ponddong-foreground.png;..\..\assets\frog.png;..\..\assets\turtle.png;..\..\assets\egret-flight.png;..\..\assets\egret-rest.png;..\..\assets\pond-data.js;..\..\assets\favicon.svg" Link="web\assets\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\assets\pond.jpg;..\..\assets\pondchun.png;..\..\assets\pondxia.png;..\..\assets\pondqiu.png;..\..\assets\ponddong.png;..\..\assets\pondchun-foreground.png;..\..\assets\pondxia-foreground.png;..\..\assets\pondqiu-foreground.png;..\..\assets\ponddong-foreground.png;..\..\assets\frog.png;..\..\assets\egret-flight.png;..\..\assets\egret-rest.png;..\..\assets\pond-data.js;..\..\assets\favicon.svg" Link="web\assets\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

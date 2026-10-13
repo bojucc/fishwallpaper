@@ -22,10 +22,10 @@ const icon=n=>`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${ICONS[n]||
 function icons(root=document){root.querySelectorAll('[data-icon]').forEach(e=>e.innerHTML=icon(e.dataset.icon));}
 icons();
 let saved=null;try{saved=sanitizeSave(JSON.parse(localStorage.getItem('bichi-pond-v1')??localStorage.getItem('xitan-pond-v1')??localStorage.getItem('bitan-pond-v1')));}catch{}
-const defaults={weather:'sunny',speed:1,turtles:true,crabs:true,silverCarp:true,butterflies:true,names:false,frogEnabled:true,egretEnabled:true,quality:'high',cardOpacity:.78,cardHidden:false,autoWeather:false,seasonMode:'auto',location:null,night:false,pondMaterial:'stone',water:true,waterType:'stream',waterVol:.6,weatherSound:true,weatherVol:.6,music:'guqin',musicVol:.5,sfx:true,volume:.7,rainAmount:.5,snowAmount:.5,soundOn:false};
+const defaults={weather:'sunny',speed:1,turtles:true,crabs:true,silverCarp:true,butterflies:true,names:false,frogEnabled:true,egretEnabled:true,quality:'high',rightClickAction:false,cardOpacity:.78,cardHidden:false,autoWeather:false,seasonMode:'auto',location:null,night:false,pondMaterial:'stone',water:true,waterType:'stream',waterVol:.6,weatherSound:true,weatherVol:.6,music:'guqin',musicVol:.5,sfx:true,volume:.7,rainAmount:.5,snowAmount:.5,soundOn:false};
 const settings={...defaults};
 // Copy valid values from a stored settings object (this page's save, or one written by another window).
-function readSettings(src){for(const key of ['turtles','crabs','silverCarp','butterflies','names','frogEnabled','egretEnabled','autoWeather','night','sfx','water','weatherSound','cardHidden','soundOn'])if(typeof src[key]==='boolean')settings[key]=src[key];
+function readSettings(src){for(const key of ['turtles','crabs','silverCarp','butterflies','names','frogEnabled','egretEnabled','autoWeather','night','sfx','water','weatherSound','cardHidden','soundOn','rightClickAction'])if(typeof src[key]==='boolean')settings[key]=src[key];
   if(PondAudio.MUSIC.includes(src.music))settings.music=src.music;if(PondAudio.WATERS.includes(src.waterType))settings.waterType=src.waterType;for(const key of ['volume','waterVol','weatherVol','musicVol','rainAmount','snowAmount'])if(Number.isFinite(src[key]))settings[key]=clamp(src[key],0,1);
   if(['sunny','cloudy','rain','snow'].includes(src.weather))settings.weather=src.weather;
   settings.speed=clamp(Number(src.speed)||1,.3,2);
@@ -87,7 +87,10 @@ function resize(){
   width=innerWidth;height=innerHeight;dpr=settings.quality==='eco'?1:Math.max(1,Math.min(devicePixelRatio||1,3)*perf.scales[perf.level]);
   simulation.width=width;simulation.height=height;simulation.scale=clamp(Math.min(width,height)/720,.66,1.25);
   labels.width=Math.round(width*dpr);labels.height=Math.round(height*dpr);
-  if(renderer){renderer.resize(width,height,dpr,settings.quality);scene.layout(width,height);}
+  if(renderer){
+    document.body.classList.add('renderer-resizing');
+    renderer.resize(width,height,dpr,settings.quality);scene.layout(width,height);
+  }
 }
 addEventListener('resize',resize);resize();
 // Sprites are keyed by what they depict; pond fish never change after creation, the preview does.
@@ -97,6 +100,8 @@ function fishCanvas(f){const key=spriteKey(f);let c=spriteCache.get(key);if(!c){
 function uploadSprites(){if(!renderer)return;simulation.allFish.forEach((f,i)=>{if(!f.spriteReady||f.spriteCell!==i){renderer.setFish(i,fishCanvas(f));f.spriteReady=true;f.spriteCell=i;}});}
 function bindCanvas(){canvas.addEventListener('pointerdown',e=>feedAt(e.clientX,e.clientY));canvas.addEventListener('pointermove',e=>{if(scene?.disturbEgret(e.clientX,e.clientY)&&e.buttons&&sound.active)sound.tap();});canvas.addEventListener('keydown',e=>{if(e.code==='Space'){e.preventDefault();feedAt(width*.5,height*.5);}});}
 bindCanvas();
+document.addEventListener('pointerdown',e=>{if(e.button===2){e.preventDefault();e.stopPropagation();}},true);
+document.addEventListener('contextmenu',e=>{if(!e.target.closest?.('#world'))return;if(!settings.rightClickAction)return;e.preventDefault();feedAt(e.clientX,e.clientY);});
 function createPond(){
   renderer=PondGL.createRenderer(canvas,bedImage,sprites,()=>{renderer=null;createPond();},PondScene.floatMask(bedImage.naturalWidth,bedImage.naturalHeight));
   if(!renderer){startupError('当前浏览器无法绘制池塘');return;}
@@ -118,7 +123,7 @@ function setSeasonForeground(path){document.querySelector('.pond-foreground')?.s
 function loadImage(path){return new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=()=>reject(Error(`season image failed: ${path}`));image.src=path;});}
 // The supplied animal PNGs are large transparent exports. Trim their alpha bounds
 // before packing them into WebGL's fixed 2048px atlas; the source files stay intact.
-function imageSprite(image,ppu=8,maxPixels=384){
+function imageSprite(image,ppu=8,maxPixels=384,anchor='center',egret=false){
   const w=image.naturalWidth||image.width,h=image.naturalHeight||image.height;
   const probe=document.createElement('canvas');probe.width=w;probe.height=h;
   const ctx=probe.getContext('2d');ctx.drawImage(image,0,0);
@@ -128,7 +133,15 @@ function imageSprite(image,ppu=8,maxPixels=384){
   const pad=4,sx=Math.max(0,x0-pad),sy=Math.max(0,y0-pad),sw=Math.min(w-sx,x1-x0+1+pad*2),sh=Math.min(h-sy,y1-y0+1+pad*2),scale=Math.min(1,maxPixels/Math.max(sw,sh));
   const out=document.createElement('canvas');out.width=Math.max(1,Math.round(sw*scale));out.height=Math.max(1,Math.round(sh*scale));
   out.getContext('2d').drawImage(image,sx,sy,sw,sh,0,0,out.width,out.height);
-  return {canvas:out,w:out.width,h:out.height,ppu,px:.5,py:.5};
+  // Apply the same gentle fringe cleanup to runtime-loaded PNGs as the
+  // procedural/reference sprite path. The egret-specific pass removes the
+  // opaque white matte line ahead of the beak without erasing white feathers.
+  PondArt.cleanImageFringe(out, egret);
+  const cleaned=out.getContext('2d',{willReadFrequently:true}).getImageData(0,0,out.width,out.height).data;
+  let minAX=out.width,maxAX=-1,maxAY=-1;
+  for(let y=0;y<out.height;y++)for(let x=0;x<out.width;x++){if(cleaned[(y*out.width+x)*4+3]<8)continue;minAX=Math.min(minAX,x);maxAX=Math.max(maxAX,x);maxAY=Math.max(maxAY,y);}
+  const px=maxAX>=0?(minAX+maxAX+1)/(2*out.width):.5,py=anchor==='feet'&&maxAY>=0?(maxAY+1)/out.height:.5;
+  return {canvas:out,w:out.width,h:out.height,ppu,px,py};
 }
 async function applySeason({notify=false}={}){
   const season=resolveSeason(settings.seasonMode,new Date(),settings.location?.timezone),path=SEASON_IMAGES[season];
@@ -177,6 +190,7 @@ function frame(now){requestAnimationFrame(frame);const frameInterval=1000/Math.m
   for(const e of scene.events.splice(0)){if(e.type==='thunder')sound.thunderAfter(e.delay,e.strength);if(e.type==='frog-jump'&&sound.active)sound.frogJump();}
   scene.draw(settings);renderer.render(time,dt,scene.look);
   drawLabels();drawPreview(dt);
+  document.body.classList.remove('renderer-resizing');
   document.body.classList.remove('app-loading');
 }
 async function start(){
@@ -187,14 +201,38 @@ async function start(){
   updateSeasonCard();createPond();requestAnimationFrame(frame);
   // Animal sprites are not part of the first-frame critical path. The renderer starts with
   // procedural fallbacks, then swaps in the supplied cut-outs without delaying the pond.
-  Promise.all([loadImage('assets/frog.png'),loadImage('assets/turtle.png'),loadImage('assets/egret-flight.png'),loadImage('assets/egret-rest.png')]).then(([frog,turtle,egretFlight,egretRest])=>{
-    const loaded=PondArt.miscSprites(imageSprite(frog,8),imageSprite(turtle,6),imageSprite(egretFlight,7),imageSprite(egretRest,7));
+  const animalAssets=[
+    ['assets/frog-rest.png',8],['assets/egret-flight.png',7],['assets/egret-rest.png',7],
+    ['assets/frog-jump.png',8],['assets/frog-land.png',8],['assets/frog-swim.png',8]
+  ];
+  Promise.allSettled(animalAssets.map(([file])=>loadImage(file))).then(results=>{
+    const spriteFor=(index,ppu)=>results[index].status==='fulfilled'
+      ? PondArt.imageSprite(
+          results[index].value,
+          ppu,
+          640,
+           index === 2 ? 'feet' : 'center',
+           index === 1 || index === 2
+        )
+      : undefined;
+    const loaded=PondArt.miscSprites(
+      spriteFor(0,8),undefined,spriteFor(1,7),spriteFor(2,7),undefined,
+      spriteFor(3,8),spriteFor(4,8),spriteFor(5,8)
+    );
+    const base=loaded.frog;
+    if(base?.canvas?.width&&base.ppu){
+      const logicalWidth=base.canvas.width/base.ppu;
+      for(const key of ['frog','frogJump','frogLand','frogSwim']){
+        const sprite=loaded[key];
+        if(sprite?.canvas?.width)sprite.ppu=sprite.canvas.width/logicalWidth;
+      }
+    }
     sprites=loaded;renderer?.setSprites(loaded);
-  }).catch(()=>{});
+  });
 }
 start();
 function updateMeta(){if(daily.date!==dayKey())daily={date:dayKey(),count:0};$('#fish-count').textContent=`${simulation.fish.length} 尾锦鲤${settings.silverCarp?` · ${simulation.residents.length} 尾青鲢`:''}`;$('#fed-count').textContent=`今日投喂 ${daily.count} 次`;}
-function feedAt(x,y){if(!scene)return;if(scene.hitFrog(x,y))return;if(!feedMode&&scene.hitEgret(x,y))return;scene.disturbEgret(x,y);if(scene.hitLeaf(x,y)){if(sound.active)sound.tap();return;}scene.startle(x,y);if(!feedMode){scene.drop(x,y,9*scene.scale,.9);simulation.scare(x,y,170*scene.scale);sound.tap();return;}scene.drop(x,y,7*scene.scale,.5);const before=simulation.food.length;if(simulation.feed(x,y)){for(const p of simulation.food.slice(before))scene.drop(p.x,p.y,3*scene.scale,.22);if(daily.date!==dayKey())daily={date:dayKey(),count:0};daily.count++;updateMeta();scheduleSave();if(sound.active)sound.plop();}else toast('鱼食还没吃完，让小鱼慢慢享用吧');}
+function feedAt(x,y){if(!scene)return;if(scene.hitFrog(x,y))return;if(scene.hitEgret(x,y))return;scene.disturbEgret(x,y);if(scene.hitLeaf(x,y)){if(sound.active)sound.tap();return;}scene.startle(x,y);if(!feedMode){scene.drop(x,y,9*scene.scale,.9);simulation.scare(x,y,170*scene.scale);sound.tap();return;}scene.drop(x,y,7*scene.scale,.5);const before=simulation.food.length;if(simulation.feed(x,y)){for(const p of simulation.food.slice(before))scene.drop(p.x,p.y,3*scene.scale,.22);if(daily.date!==dayKey())daily={date:dayKey(),count:0};daily.count++;updateMeta();scheduleSave();if(sound.active)sound.plop();}else toast('鱼食还没吃完，让小鱼慢慢享用吧');}
 $('#feed-button').addEventListener('click',()=>{feedMode=!feedMode;$('#feed-button').classList.toggle('active',feedMode);$('#feed-button').setAttribute('aria-pressed',feedMode);$('#pond-hint').textContent=feedMode?'轻点水面，投下一点欢喜':'轻点水面，泛起一圈涟漪';toast(feedMode?'投喂已开启，轻点水面试试':'观鱼模式 · 轻点水面，鱼儿会受惊游开');});
 function forecastDayLabel(i,date){if(i===0)return '今天';if(i===1)return '明天';if(i===2)return '后天';return date||'—';}
 function renderForecast(){const box=$('#forecast');if(!box)return;const labels={sunny:'晴',cloudy:'多云',rain:'雨',snow:'雪'};const fallback=settings.autoWeather&&weatherForecast.length?weatherForecast:Array.from({length:3},()=>({weather:settings.weather,max:null,min:null,date:''}));box.innerHTML=fallback.slice(0,3).map((d,i)=>{const max=d.max==null?'--':`${d.max}°`;const min=d.min==null?'--':`${d.min}°`;return `<div class="forecast-day"><span>${forecastDayLabel(i,d.date)}</span><span class="forecast-icon">${icon(d.weather)}</span><strong>${labels[d.weather]||'晴'}</strong><small>${max} / ${min}</small></div>`;}).join('');}
@@ -245,7 +283,7 @@ function renderSettings(){
     ['egretEnabled','白鹭','晴天或多云时偶尔飞来停留'],
     ['names','显示锦鲤名字','在水面认出你的每一位朋友']
   ];
-  $('#panel-content').innerHTML=`<p class="description">把这方小天地，调成你喜欢的模样。</p><section class="setting-section"><div class="section-heading">池塘与画面</div><div class="setting-row"><div>池底材质<small>青石板、鹅卵石、深泥底或青苔砖</small></div><select class="control-select" id="pond-material" aria-label="池底材质">${PondCore.POND_MATERIALS.map(m=>`<option value="${m.id}" ${settings.pondMaterial===m.id?'selected':''}>${m.name}</option>`).join('')}</select></div><div class="setting-row"><div>游动速度<small>慢一点，也是一种生活</small></div><input id="swim-speed" type="range" aria-label="游动速度" min="0.3" max="2" step="0.1" value="${settings.speed}"/></div>${rows.map(([k,n,d])=>`<div class="setting-row"><div>${n}<small>${d}</small></div><input data-setting="${k}" type="checkbox" aria-label="${n}" ${settings[k]?'checked':''}/></div>`).join('')}<div class="setting-row"><div>画面品质<small>节能模式限制至 30 帧</small></div><select class="control-select" id="quality" aria-label="画面品质"><option value="high" ${settings.quality==='high'?'selected':''}>细腻 · 60 帧</option><option value="eco" ${settings.quality==='eco'?'selected':''}>节能 · 30 帧</option></select></div></section><section class="setting-section setting-stack"><div class="section-heading">声音</div><div class="setting-row"><div>总音量<small>底栏喇叭可随时开关全部声音</small></div><input id="volume" type="range" aria-label="总音量" min="0" max="1" step="0.05" value="${settings.volume}"/></div><div class="setting-row"><div>水声<small>池畔流水，独立于天气</small></div><div class="sound-ctl"><input data-vol="waterVol" type="range" aria-label="水声音量" min="0" max="1" step="0.05" value="${settings.waterVol}"/><select class="control-select" id="water-type" aria-label="水声">${[['stream','溪流潺潺'],['spring','山泉叮咚'],['cascade','叠水瀑声'],['lapping','池水轻漾'],['bamboo','竹筒惊鹿'],['off','关闭']].map(([v,n])=>`<option value="${v}" ${(settings.water?settings.waterType:'off')===v?'selected':''}>${n}</option>`).join('')}</select></div></div><div class="setting-row"><div>天气环境音<small>晴有鸟鸣、阴闻布谷、雨落池塘、雪有寒鸦</small></div><div class="sound-ctl"><input data-vol="weatherVol" type="range" aria-label="天气环境音音量" min="0" max="1" step="0.05" value="${settings.weatherVol}"/><input data-sound="weatherSound" type="checkbox" aria-label="天气环境音" ${settings.weatherSound?'checked':''}/></div></div><div class="setting-row"><div>禅意音乐<small>稀疏几声，不扰清静</small></div><div class="sound-ctl"><input data-vol="musicVol" type="range" aria-label="禅意音乐音量" min="0" max="1" step="0.05" value="${settings.musicVol}"/><select class="control-select" id="music" aria-label="禅意音乐">${[['guqin','古琴'],['bowl','颂钵'],['chimes','风铃'],['off','关闭']].map(([v,n])=>`<option value="${v}" ${settings.music===v?'selected':''}>${n}</option>`).join('')}</select></div></div><div class="setting-row"><div>互动水声<small>投喂、吞食与轻点水面的声音</small></div><input data-sound="sfx" type="checkbox" aria-label="互动水声" ${settings.sfx?'checked':''}/></div>${window.PondHost?`<div class="setting-row"><div>手机动态壁纸<small id="wallpaper-note">${PondHost.isWallpaperActive()?'池塘已在桌面上 · 轻点桌面空白处投喂':'把池塘设为手机桌面背景'}</small></div><button id="set-wallpaper" class="secondary">设为壁纸</button></div>`:''}</section><div class="form-actions"><span class="small-note">锦鲤和投喂记录会自动保存在此设备</span><button id="fullscreen" class="secondary">全屏观鱼</button></div><div class="dialog-footer">空格：在池塘中央投喂（先点水面）<br>H：隐藏 / 显示界面 · Esc：退出面板或沉浸模式<br>根据「碧潭观鱼」视频独立复刻，非原作者官方作品。</div>`;
+  $('#panel-content').innerHTML=`<p class="description">把这方小天地，调成你喜欢的模样。</p><section class="setting-section"><div class="section-heading">池塘与画面</div><div class="setting-row"><div>池底材质<small>青石板、鹅卵石、深泥底或青苔砖</small></div><select class="control-select" id="pond-material" aria-label="池底材质">${PondCore.POND_MATERIALS.map(m=>`<option value="${m.id}" ${settings.pondMaterial===m.id?'selected':''}>${m.name}</option>`).join('')}</select></div><div class="setting-row"><div>游动速度<small>慢一点，也是一种生活</small></div><input id="swim-speed" type="range" aria-label="游动速度" min="0.3" max="2" step="0.1" value="${settings.speed}"/></div>${rows.map(([k,n,d])=>`<div class="setting-row"><div>${n}<small>${d}</small></div><input data-setting="${k}" type="checkbox" aria-label="${n}" ${settings[k]?'checked':''}/></div>`).join('')}<div class="setting-row"><div>右键投喂/惊鱼<small>开启后右键执行投喂或惊鱼；关闭时右键无动作</small></div><input data-setting="rightClickAction" type="checkbox" aria-label="右键投喂/惊鱼" ${settings.rightClickAction?"checked":""}/></div><div class="setting-row"><div>画面品质<small>节能模式限制至 30 帧</small></div><select class="control-select" id="quality" aria-label="画面品质"><option value="high" ${settings.quality==='high'?'selected':''}>细腻 · 60 帧</option><option value="eco" ${settings.quality==='eco'?'selected':''}>节能 · 30 帧</option></select></div></section><section class="setting-section setting-stack"><div class="section-heading">声音</div><div class="setting-row"><div>总音量<small>底栏喇叭可随时开关全部声音</small></div><input id="volume" type="range" aria-label="总音量" min="0" max="1" step="0.05" value="${settings.volume}"/></div><div class="setting-row"><div>水声<small>池畔流水，独立于天气</small></div><div class="sound-ctl"><input data-vol="waterVol" type="range" aria-label="水声音量" min="0" max="1" step="0.05" value="${settings.waterVol}"/><select class="control-select" id="water-type" aria-label="水声">${[['stream','溪流潺潺'],['spring','山泉叮咚'],['cascade','叠水瀑声'],['lapping','池水轻漾'],['bamboo','竹筒惊鹿'],['off','关闭']].map(([v,n])=>`<option value="${v}" ${(settings.water?settings.waterType:'off')===v?'selected':''}>${n}</option>`).join('')}</select></div></div><div class="setting-row"><div>天气环境音<small>晴有鸟鸣、阴闻布谷、雨落池塘、雪有寒鸦</small></div><div class="sound-ctl"><input data-vol="weatherVol" type="range" aria-label="天气环境音音量" min="0" max="1" step="0.05" value="${settings.weatherVol}"/><input data-sound="weatherSound" type="checkbox" aria-label="天气环境音" ${settings.weatherSound?'checked':''}/></div></div><div class="setting-row"><div>禅意音乐<small>稀疏几声，不扰清静</small></div><div class="sound-ctl"><input data-vol="musicVol" type="range" aria-label="禅意音乐音量" min="0" max="1" step="0.05" value="${settings.musicVol}"/><select class="control-select" id="music" aria-label="禅意音乐">${[['guqin','古琴'],['bowl','颂钵'],['chimes','风铃'],['off','关闭']].map(([v,n])=>`<option value="${v}" ${settings.music===v?'selected':''}>${n}</option>`).join('')}</select></div></div><div class="setting-row"><div>互动水声<small>投喂、吞食与轻点水面的声音</small></div><input data-sound="sfx" type="checkbox" aria-label="互动水声" ${settings.sfx?'checked':''}/></div>${window.PondHost?`<div class="setting-row"><div>手机动态壁纸<small id="wallpaper-note">${PondHost.isWallpaperActive()?'池塘已在桌面上 · 轻点桌面空白处投喂':'把池塘设为手机桌面背景'}</small></div><button id="set-wallpaper" class="secondary">设为壁纸</button></div>`:''}</section><div class="form-actions"><span class="small-note">锦鲤和投喂记录会自动保存在此设备</span><button id="fullscreen" class="secondary">全屏观鱼</button></div><div class="dialog-footer">空格：在池塘中央投喂（先点水面）<br>H：隐藏 / 显示界面 · Esc：退出面板或沉浸模式<br>根据「碧潭观鱼」视频独立复刻，非原作者官方作品。</div>`;
   $('#set-wallpaper')?.addEventListener('click',()=>PondHost.setWallpaper());
   $('#pond-material').addEventListener('change',e=>{settings.pondMaterial=PondCore.normalizePondMaterial(e.target.value);applyPondMaterial();persist();});
   $('#swim-speed').addEventListener('input',e=>{settings.speed=Number(e.target.value);scheduleSave();});
@@ -284,3 +322,6 @@ window.pondControl={
 window.pondTap=(x,y)=>{if(!scene)return;if(scene.hitFrog(x,y)||scene.hitEgret(x,y))return;if(scene.hitLeaf(x,y)){if(sound.active)sound.tap();return;}if(simulation.food.length<=160){feedMode=true;feedAt(x,y);}else{scene.startle(x,y);scene.drop(x,y,9*scene.scale,.9);simulation.scare(x,y,170*scene.scale);}};
 // Wallpaper Engine web wallpaper lifecycle and editable properties.
 window.wallpaperPropertyListener={applyGeneralProperties(properties){if(properties.fps)hostFps=clamp(Number(properties.fps)||60,1,144);},applyUserProperties(properties){if(properties.weather&&['sunny','cloudy','rain','snow'].includes(properties.weather.value)){settings.weather=properties.weather.value;settings.autoWeather=false;weatherRequest++;}if(properties.speed)settings.speed=clamp(Number(properties.speed.value)||1,.3,2);if(properties.showui)setZen(!properties.showui.value);for(const [p,k] of [['water','water'],['weathersound','weatherSound']])if(properties[p])settings[k]=!!properties[p].value;if(properties.rainamount)settings.rainAmount=clamp(Number(properties.rainamount.value)||0,0,1);if(properties.snowamount)settings.snowAmount=clamp(Number(properties.snowamount.value)||0,0,1);if(properties.watertype&&PondAudio.WATERS.includes(properties.watertype.value))settings.waterType=properties.watertype.value;if(properties.music&&PondAudio.MUSIC.includes(properties.music.value))settings.music=properties.music.value;if(properties.volume)settings.volume=clamp(Number(properties.volume.value)||0,0,1);applyWeather();if(properties.sound&&!!properties.sound.value!==sound.active)toggleSound();},setPaused:setPausedState};
+
+
+// Floating toggle removed

@@ -35,18 +35,18 @@ test('无效时区不会阻塞自动季节解析并回退本机日期',()=>{
   assert.equal(resolveSeason('auto',new Date('2026-10-01T00:00:00Z'),'not/a-timezone'),'autumn');
   assert.equal(resolveSeason('auto',new Date('2026-10-01T00:00:00Z')),'autumn');
 });
-test('锦鲤按累计进食量分三段成长，青鲢不成长且不改基础体型',()=>{
+test('锦鲤按累计进食量分三段成长至 1.4 倍，青鲢不成长且不改基础体型',()=>{
   assert.equal(growthScaleForEaten(0),1);
   assert.equal(growthScaleForEaten(49),1);
-  assert.equal(growthScaleForEaten(50),1.5);
-  assert.equal(growthScaleForEaten(119),1.5);
-  assert.equal(growthScaleForEaten(120),1.8);
-  assert.equal(growthScaleForEaten(209),1.8);
-  assert.equal(growthScaleForEaten(210),2);
-  assert.equal(growthScaleForEaten(999),2);
+  assert.equal(growthScaleForEaten(50),1.2);
+  assert.equal(growthScaleForEaten(119),1.2);
+  assert.equal(growthScaleForEaten(120),1.3);
+  assert.equal(growthScaleForEaten(209),1.3);
+  assert.equal(growthScaleForEaten(210),1.4);
+  assert.equal(growthScaleForEaten(999),1.4);
   assert.equal(growthScaleForEaten(210,'silvercarp'),1);
   const fish={size:.8,eaten:120};
-  assert.ok(Math.abs(fishRenderSize(fish,1)-1.44)<1e-9);
+  assert.ok(Math.abs(fishRenderSize(fish,1)-1.04)<1e-9);
   assert.equal(fish.size,.8);
 });
 test('三天预报只读取有限数值，并转换天气代码',()=>{

@@ -354,6 +354,7 @@
       this.drop(t, 95, .3, rand(-.35, .35), .9);
       this.drop(t + .018, 760, .07, rand(-.45, .45), .35);
     }
+    frogCall() { if (!this.ok()) return; const t = this.context.currentTime; this.drop(t, 520, .16, -.12, .15); this.drop(t + .16, 410, .13, .1, -.08); }
     // A fingertip touching the water.
     tap() { if (this.ok()) this.drop(this.context.currentTime, rand(520, 700), .2, 0, 1.2); }
     drop(t, f, gain, pan, rise = .9) { this.tone(t, f, f * (1 + rise), Math.min(.12, 22 / f + .02) * 1.6, gain, pan, this.sfxBus, 'sine', .002); }

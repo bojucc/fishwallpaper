@@ -1,7 +1,6 @@
 Add-Type -AssemblyName System.Drawing
 
 $sourceFrog = 'C:\Users\Administrator\Desktop\AIPAI_1790709029054.png'
-$sourceTurtle = 'C:\Users\Administrator\Desktop\AIPAI_1790709632973.png'
 $assetDir = Join-Path $PSScriptRoot '..\assets'
 
 Add-Type -AssemblyName System.Drawing
@@ -62,5 +61,4 @@ public static class AnimalSpriteCleaner {
 "@
 
 [AnimalSpriteCleaner]::Clean($sourceFrog, (Join-Path $assetDir 'frog.png'))
-[AnimalSpriteCleaner]::Clean($sourceTurtle, (Join-Path $assetDir 'turtle.png'))
-Write-Output "已清理 frog.png 与 turtle.png"
+Write-Output "已清理 frog.png"

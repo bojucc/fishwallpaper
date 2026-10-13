@@ -51,10 +51,15 @@
   function growthScaleForEaten(eaten, species) {
     if (species === 'silvercarp') return 1;
     const count = Math.max(0, Math.floor(Number(eaten) || 0));
-    return count >= 210 ? 2 : count >= 120 ? 1.8 : count >= 50 ? 1.5 : 1;
+    return count >= 210 ? 1.4 : count >= 120 ? 1.3 : count >= 50 ? 1.2 : 1;
   }
   function fishRenderSize(fish, sceneScale = 1) {
-    return (Number(fish?.size) || .8) * growthScaleForEaten(fish?.eaten, fish?.species) * (Number(sceneScale) || 1);
+    const scene = Number(sceneScale) || 1;
+    const base = clamp(Number(fish?.size) || .8, .45, 1.12);
+    // 青鲢保留细长鱼种的原始尺寸；普通锦鲤按累计鱼食阶段成长，
+    // 成长阶段最多为初始体型的 1.4 倍，避免成熟锦鲤压过池塘整体比例。
+    if (fish?.species === 'silvercarp') return base * scene;
+    return base * growthScaleForEaten(fish?.eaten, fish?.species) * scene;
   }
   function normalizeForecast(data) {
     const daily = data?.daily || {}, times = Array.isArray(daily.time) ? daily.time : [], codes = Array.isArray(daily.weather_code) ? daily.weather_code : [], maxes = Array.isArray(daily.temperature_2m_max) ? daily.temperature_2m_max : [], mins = Array.isArray(daily.temperature_2m_min) ? daily.temperature_2m_min : [];
@@ -77,7 +82,7 @@
     if (f.v !== undefined) return;
     f.v = 0; f.turn = 0; f.thrust = 0; f.amp = .25; f.beating = false;
     f.depth = f.species === 'silvercarp' ? .23 + random() * .2 : .25 + random() * .55; f.depthGoal = f.depth;
-    f.goal = null; f.goalTime = 0; f.rest = 0; f.flee = 0; f.fleeAngle = 0;
+    f.goal = null; f.goalTime = 0; f.rest = 0; f.flee = 0; f.fleeAngle = 0; f.softLeave = 0; f.softLeaveAngle = 0;
     f.cruise = (.3 + random() * .22) * clamp(Number(f.speed) || 1, .5, 1.5);
     f.react = .15 + random() * .9; f.appetite = .55 + random() * .45;
     f.spine = null; f.spineSeg = 0;
@@ -121,9 +126,16 @@
   class PondSimulation {
     constructor(fish,width,height,random=Math.random,residents=[],residentsOn=true) { this.fish=fish; this.residents=residents; this.residentsOn=residentsOn; this.width=width; this.height=height; this.random=random; this.food=[]; this.totalEaten=0; this.scale=1; this.time=0; this.obstacles=[]; this.events=[]; }
     get allFish() { return this.residentsOn?this.fish.concat(this.residents):this.fish; }
-    feed(x,y,count=9) {
+    feed(x,y,count=9,zone='water') {
       if(this.food.length >= 180) return false;
-      for(let i=0;i<count && this.food.length<180;i++){const a=this.random()*TAU,r=Math.sqrt(this.random())*24;this.food.push({x:clamp(x+Math.cos(a)*r,15,this.width-15),y:clamp(y+Math.sin(a)*r,15,this.height-15),life:25,age:0,drift:this.random()*6,vx:Math.cos(a)*r*.8,vy:Math.sin(a)*r*.8,eaten:false});}
+      const normalizedZone = ['rock','leaf','flower','bud','pennywort'].includes(zone) ? zone : 'water';
+      const edible = normalizedZone === 'water' || normalizedZone === 'pennywort';
+      const life = edible ? 25 : 7;
+      for(let i=0;i<count && this.food.length<180;i++){const a=this.random()*TAU,r=Math.sqrt(this.random())*24,px=clamp(x+Math.cos(a)*r,15,this.width-15),py=clamp(y+Math.sin(a)*r,15,this.height-15);
+        const insideRock = this.obstacles.some(ob => ob.objectKind === 'rock' && Math.hypot(px-ob.x,py-ob.y) <= ob.r);
+        const pelletZone = insideRock ? 'rock' : normalizedZone;
+        const pelletEdible = pelletZone === 'water' || pelletZone === 'pennywort';
+        this.food.push({x:px,y:py,life:pelletEdible?25:7,age:0,drift:this.random()*6,vx:Math.cos(a)*r*.8,vy:Math.sin(a)*r*.8,eaten:false,blocked:false,zone:pelletZone,edible:pelletEdible});}
       return true;
     }
     // A tap without food startles nearby fish into a short dash away from it.
@@ -149,18 +161,68 @@
       const w=this.width,h=this.height,s=fishRenderSize(f,this.scale),L=BODY.length*s,random=this.random,silver=f.species==='silvercarp';
       let x=f.x*w,y=f.y*h;const cos=Math.cos(f.angle),sin=Math.sin(f.angle),mx=x+cos*BODY.nose*s,my=y+sin*BODY.nose*s;
       let food=null,fd=Infinity;const reach=Math.max(w,h)*f.appetite;
-      for(const p of (f.species === 'silvercarp' ? [] : this.food)){if(p.eaten)continue;const d=Math.hypot(p.x-mx,p.y-my);if(d<fd&&d<reach&&p.age>f.react+d/650){fd=d;food=p;}}
+      for(const p of (f.species === 'silvercarp' ? [] : this.food)){if(p.eaten||p.blocked)continue;const d=Math.hypot(p.x-mx,p.y-my);if(d<fd&&d<reach&&p.age>f.react+d/650){fd=d;food=p;}}
       let gx,gy,want,turnGain=silver?3.5:2,maxTurn=silver?2.4:1.3,sepW=2.4,boundW=3;
-      f.flee=Math.max(0,f.flee-dt);
+      f.flee=Math.max(0,f.flee-dt); f.softLeave=Math.max(0,f.softLeave-dt);
       // Startle: a fast C-turn away, then a dash.
       if(f.flee>0){gx=Math.cos(f.fleeAngle);gy=Math.sin(f.fleeAngle);want=2.6*L;turnGain=9;maxTurn=7;}
+      // 不可食鱼食只触发一次温和离开，不使用高速惊逃。
+      else if(f.softLeave>0){gx=Math.cos(f.softLeaveAngle);gy=Math.sin(f.softLeaveAngle);want=.72*L;turnGain=2.8;maxTurn=1.8;sepW=1.4;boundW=1;}
+      // 不可食鱼食仍然吸引锦鲤靠近，但不会被当成可吃目标。
       else if(food){
-        const dx=food.x-x,dy=food.y-y,d=Math.hypot(dx,dy)||1,err=Math.abs(wrap(Math.atan2(dy,dx)-f.angle));
+        let tx=food.x,ty=food.y;
+        if(food.edible===false){
+          if(food.zone==='rock'){
+            let nearest=null,nearestDistance=Infinity;
+            for(const ob of this.obstacles){const od=Math.hypot(food.x-ob.x,food.y-ob.y);if(od<nearestDistance){nearestDistance=od;nearest=ob;}}
+            if(nearest){
+              let ox=food.x-nearest.x,oy=food.y-nearest.y,od=Math.hypot(ox,oy);
+              if(od<1e-6){ox=mx-nearest.x;oy=my-nearest.y;od=Math.hypot(ox,oy)||1;}
+              tx=nearest.x+ox/od*(nearest.r+L*.9);ty=nearest.y+oy/od*(nearest.r+L*.9);
+            } else ty+=Math.max(24,BODY.nose*s*.8);
+          } else {
+            // 荷叶、荷花和花苞上的鱼食只吸引鱼游到其下方，并保持在浮物外侧。
+            const underOffset = food.zone === 'leaf' ? Math.max(32, BODY.nose*s*1.2) : Math.max(26, BODY.nose*s);
+            ty += underOffset;
+          }
+        } else {
+          // 石头外沿的水面鱼食可食，但目标点要落在鱼体安全边界外，避免直冲石头。
+          let nearest=null,nearestDistance=Infinity;
+          for(const ob of this.obstacles){if(ob.objectKind!=='rock')continue;const ox=food.x-ob.x,oy=food.y-ob.y,od=Math.hypot(ox,oy);if(od>ob.r&&od<ob.r+L*.9&&od<nearestDistance){nearest={ob,ox,oy,od};nearestDistance=od;}}
+          tx=food.x;ty=food.y;
+        }
+        const dx=tx-x,dy=ty-y,d=Math.hypot(dx,dy)||1,err=Math.abs(wrap(Math.atan2(dy,dx)-f.angle));
         gx=dx/d;gy=dy/d;want=clamp(fd/L*1.3,.25,2.2)*L*Math.max(.12,Math.cos(Math.min(err,Math.PI/2))**2);
-        // Food under the body can't be reached by pivoting; swim on to open a gap, then come back around.
         if(d<BODY.nose*s*1.15&&err>.6){gx=cos;gy=sin;want=.7*L;}
-        turnGain=4.5;maxTurn=3.4;sepW=1.1;boundW=.8;f.depthGoal=.04;
-        if(fd<Math.max(6,7*s)){food.eaten=true;f.eaten++;this.totalEaten++;this.events.push({type:'eat',x:food.x,y:food.y,fish:f});}
+        turnGain=4.5;maxTurn=3.4;sepW=1.1;boundW=.8;f.depthGoal=food.edible===false?.18:.04;
+        if(food.edible===false){
+          const blockedDistance=Math.max(45,L*.42);
+          if(d<blockedDistance){
+            // 鱼已确认目标不可达：停止再次追同一颗鱼食，但让鱼食按区域寿命自然消失。
+            food.blocked=true;
+            let ax=x-food.x,ay=y-food.y;
+            if(food.zone==='rock'){
+              let nearest=null,nearestDistance=Infinity;
+              for(const ob of this.obstacles){const od=Math.hypot(food.x-ob.x,food.y-ob.y);if(od<nearestDistance){nearestDistance=od;nearest=ob;}}
+              if(nearest){ax=x-nearest.x;ay=y-nearest.y;}
+            }
+            const toCenterX=w*.52-x,toCenterY=h*.56-y;
+            const fleeX=ax*1.35+toCenterX*.5,fleeY=ay*1.35+toCenterY*.5;
+            f.softLeave=1.35+random()*.5;
+            f.softLeaveAngle=Math.atan2(
+              fleeY || Math.sin(f.angle),
+              fleeX || Math.cos(f.angle)
+            );
+            // 确认石头遮挡后保持短促、连续的外游动力，避免贴着边缘打转。
+            f.beating=true;
+            f.v=Math.max(f.v,L*.62);
+            f.depthGoal=Math.min(.7,f.depth+.08);
+          }
+        } else {
+          let eatDistance=Math.max(6,7*s);
+          // 石头遮挡区由 feed() 的 ob.r 判定；遮挡区外恢复普通进食距离。
+          if(fd<eatDistance){food.eaten=true;f.eaten++;this.totalEaten++;this.events.push({type:'eat',x:food.x,y:food.y,fish:f});}
+        }
       } else {
         f.goalTime-=dt;
         if(!f.goal||f.goalTime<=0||Math.hypot(f.goal.x*w-x,f.goal.y*h-y)<L*1.3)this.pickGoal(f);
@@ -200,6 +262,42 @@
       f.phase=(f.phase+dt*TAU*(silver?1.22:1)*(.45+f.thrust*(1.1+1.3*Math.min(2.5,bl))+Math.abs(f.turn)*.35))%(TAU*1000);
       f.amp+=((.14+.86*f.thrust*Math.min(1,.5+bl*.6)+Math.min(.4,Math.abs(f.turn)*.25))-f.amp)*Math.min(1,dt*3);
       x+=Math.cos(f.angle)*f.v*dt;y+=Math.sin(f.angle)*f.v*dt;
+      // 最终 containment：鱼不能停留在石头内部；推出后进入短暂逃逸，避免再次被鱼食吸回。
+      for(const ob of this.obstacles){
+        if(ob.objectKind!=='rock')continue;
+        const safe=ob.r+L*.12;
+        const escapeSafe=safe+L*.05;
+        const dx=x-ob.x;
+        const dy=y-ob.y;
+        const d=Math.hypot(dx,dy);
+        if(d<safe){
+          const nx=d>1e-6 ? dx/d : Math.cos(f.angle);
+          const ny=d>1e-6 ? dy/d : Math.sin(f.angle);
+          const toCenterX=w*.52-x;
+          const toCenterY=h*.56-y;
+          const awayX=nx*1.35+toCenterX*.5;
+          const awayY=ny*1.35+toCenterY*.5;
+          const away=Math.atan2(
+            awayY || Math.sin(f.angle),
+            awayX || Math.cos(f.angle)
+          );
+          // 推到安全边界之外，避免下一帧继续贴住石头。
+          x=ob.x+nx*escapeSafe;
+          y=ob.y+ny*escapeSafe;
+          // 只施加受限转向速度，保留渐进转弯，避免碰石头时瞬间 180 度掉头。
+          f.turn=clamp(
+            wrap(away-f.angle)*1.35,
+            -1.35,
+            1.35
+          );
+          f.softLeave=Math.max(f.softLeave,1.35);
+          f.softLeaveAngle=away;
+          f.beating=true;
+          f.v=Math.max(f.v,L*.62);
+          f.depthGoal=Math.min(.7,f.depth+.08);
+          for(const p of this.food){if(p.zone==='rock'&&Math.hypot(p.x-ob.x,p.y-ob.y)<=ob.r+L)p.blocked=true;}
+        }
+      }
       f.x=clamp(x/w,.03,.97);f.y=clamp(y/h,.035,.965);
       f.depth+=(f.depthGoal-f.depth)*Math.min(1,dt*(food?1.2:.35));
       updateSpine(f,s,w,h);
@@ -209,11 +307,221 @@
     if(!data||!Array.isArray(data.fish)||!data.fish.length) return null;
     const fish=data.fish.slice(0,60).filter(f=>f&&typeof f.name==='string').map((f,i)=>{
       const defaults=createFish(i,randomSeed(i+8));
-      return {...defaults,id:typeof f.id==='string'?f.id.slice(0,80):defaults.id,name:f.name.trim().slice(0,12)||defaults.name,palette:Number.isInteger(f.palette)?clamp(f.palette,0,PALETTES.length-1):0,size:clamp(Number(f.size)||.8,.45,1.5),seed:Number.isFinite(f.seed)?f.seed:defaults.seed,eaten:clamp(Math.floor(Number(f.eaten)||0),0,9999999),marks:Array.isArray(f.marks)?f.marks.slice(0,400).filter(m=>m&&Number.isFinite(m.x)&&Number.isFinite(m.y)&&Number.isFinite(m.r)&&/^#[0-9a-f]{6}$/i.test(m.color)).map(m=>({x:clamp(m.x,-32,32),y:clamp(m.y,-16,16),r:clamp(m.r,1,8),color:m.color})):[]};
+      const paintColor=value=>{const raw=String(value||'').trim();if(/^#[0-9a-f]{6}$/i.test(raw))return raw.toLowerCase();if(/^#[0-9a-f]{3}$/i.test(raw))return '#'+raw.slice(1).split('').map(ch=>ch+ch).join('').toLowerCase();const rgb=raw.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);if(rgb){const c=n=>clamp(Number(n)||0,0,255).toString(16).padStart(2,'0');return `#${c(rgb[1])}${c(rgb[2])}${c(rgb[3])}`;}return null;};
+      return {...defaults,species:undefined,id:typeof f.id==='string'?f.id.slice(0,80):defaults.id,name:f.name.trim().slice(0,12)||defaults.name,palette:Number.isInteger(f.palette)?clamp(f.palette,0,PALETTES.length-1):0,size:clamp(Number(f.size)||.8,.45,1.12),seed:Number.isFinite(f.seed)?f.seed:defaults.seed,eaten:clamp(Math.floor(Number(f.eaten)||0),0,9999999),marks:Array.isArray(f.marks)?f.marks.slice(0,400).map(m=>{const color=paintColor(m?.color);return m&&color&&Number.isFinite(m.x)&&Number.isFinite(m.y)&&Number.isFinite(m.r)?{x:clamp(m.x,-60,36),y:clamp(m.y,-24,24),r:clamp(m.r,1,8),color}:null;}).filter(Boolean):[]};
     });
     return fish.length?{fish,settings:data.settings&&typeof data.settings==='object'?data.settings:{},daily:data.daily}:null;
   }
-  const api={PALETTES,SILVER_CARP,POND_MATERIALS,normalizePondMaterial,fishPalette,createSilverCarpShoal,BODY,randomSeed,weatherFromCode,clamp,normalizeCardOpacity,normalizeSeasonMode,seasonForMonth,resolveSeason,growthScaleForEaten,fishRenderSize,normalizeForecast,wrap,createFish,updateSpine,fishPose,PondSimulation,sanitizeSave};
+// 在core.js末尾添加TadpoleSwarm类
+class TadpoleSwarm {
+  constructor(count = 25, frogPos = null) {
+    this.tadpoles = [];
+    for (let i = 0; i < count; i++) {
+      this.tadpoles.push({
+        // Start in open water rather than directly under the frog/foreground.
+        // frogPos remains the homing target used after the call.
+        x: 0.18 + Math.random() * 0.64,
+        y: 0.24 + Math.random() * 0.54,
+        vx: 0, vy: 0,
+        phase: Math.random() * 6.28,
+        speed: 0.15 + Math.random() * 0.1,
+        depth: 0.5 + Math.random() * 0.3
+      });
+    }
+    this.state = 'seeking'; // seeking | following_turtle | following_fish | homing | grouped
+    this.targetEntity = null;
+    this.frogPos = frogPos;
+    this.frogCallTime = 0;
+    this.panicUntil = 0;
+    this.groupedTime = 0;
+    this.opacity = 0;
+    this.fadeIn = true;
+  }
+
+  update(dt, scene) {
+    if (this.fadeIn) {
+      this.opacity = Math.min(1, this.opacity + dt * 2);
+      if (this.opacity >= 1) this.fadeIn = false;
+    }
+
+    // 聚集一段时间后淡出；场景会在青蛙仍在场时按冷却重建一群，
+    // 避免一次事件结束后永久看不到蝌蚪。
+    if (this.state === 'grouped') {
+      this.groupedTime += dt;
+      if (this.groupedTime > 210) {
+        this.opacity = Math.max(0, this.opacity - dt * 0.35);
+        if (this.opacity <= 0) return true; // 标记为可删除
+      }
+    }
+
+    const w = scene.w || scene.width || 1, h = scene.h || scene.height || 1;
+    const allFish = scene.sim ? scene.sim.allFish : [];
+    const turtles = scene.turtles || [];
+    const turtle = turtles.find(t => t && t.state !== 'hidden') || null;
+    const isPanic = Date.now() / 1000 < this.panicUntil;
+
+    // 青蛙蛙鸣召回
+    if (this.frogCallTime > 0) {
+      this.frogCallTime -= dt;
+      if (this.state !== 'homing' && this.state !== 'grouped') {
+        this.state = 'homing';
+        this.targetEntity = null;
+      }
+    }
+
+    // 状态机：寻找目标
+    if (this.state === 'seeking' && !isPanic) {
+      // 优先跟随乌龟
+      if (turtle) {
+        const tx = turtle.x > 1 ? turtle.x / w : turtle.x, ty = turtle.y > 1 ? turtle.y / h : turtle.y;
+        const avgDist = this.tadpoles.reduce((sum, t) =>
+          sum + Math.hypot(t.x * w - tx, t.y * h - ty), 0) / this.tadpoles.length;
+        this.state = 'following_turtle';
+        this.targetEntity = turtle;
+      }
+      // 无乌龟时跟随大锦鲤或墨鲤
+      if (this.state === 'seeking' && allFish.length > 0) {
+        const bigFish = allFish.filter(f => f.species !== 'silvercarp')
+          .sort((a, b) => (b.size || 0.8) - (a.size || 0.8))[0];
+        if (bigFish) {
+          this.state = 'following_fish';
+          this.targetEntity = bigFish;
+        }
+      }
+    }
+
+    // 更新每只蝌蚪
+    for (let i = 0; i < this.tadpoles.length; i++) {
+      const t = this.tadpoles[i];
+      t.phase += dt * (3 + t.speed * 5);
+
+      let gx = 0, gy = 0;
+
+      if (isPanic) {
+        // 恐慌状态：向四周散开
+        const cx = this.tadpoles.reduce((s, tt) => s + tt.x, 0) / this.tadpoles.length;
+        const cy = this.tadpoles.reduce((s, tt) => s + tt.y, 0) / this.tadpoles.length;
+        gx = (t.x - cx) * 3;
+        gy = (t.y - cy) * 3;
+      } else if (this.state === 'homing' || this.state === 'grouped') {
+        // 向青蛙游动
+        if (this.frogPos) {
+          const dx = this.frogPos.x - t.x, dy = this.frogPos.y - t.y;
+          const dist = Math.hypot(dx * w, dy * h);
+          if (dist < 80 && this.state === 'homing') {
+            this.state = 'grouped';
+          }
+          gx = dx; gy = dy;
+        }
+      } else if (this.targetEntity) {
+        // 跟随目标
+        const tx = this.targetEntity.x > 1 ? this.targetEntity.x / w : this.targetEntity.x;
+        const ty = this.targetEntity.y > 1 ? this.targetEntity.y / h : this.targetEntity.y;
+        const dx = tx - t.x, dy = ty - t.y;
+        const dist = Math.hypot(dx * w, dy * h);
+
+        // 目标太远，重新寻找
+        if (dist > 250) {
+          this.state = 'seeking';
+          this.targetEntity = null;
+        } else {
+          gx = dx; gy = dy;
+        }
+      }
+
+      // Boids算法：聚集、对齐、分离
+      let cohesionX = 0, cohesionY = 0, separationX = 0, separationY = 0;
+      let neighbors = 0;
+
+      for (let j = 0; j < this.tadpoles.length; j++) {
+        if (i === j) continue;
+        const other = this.tadpoles[j];
+        const dx = other.x - t.x, dy = other.y - t.y;
+        const dist = Math.hypot(dx * w, dy * h);
+
+        if (dist < 80) {
+          cohesionX += dx;
+          cohesionY += dy;
+          neighbors++;
+
+          if (dist < 25) {
+            separationX -= dx / Math.max(dist / w, 0.001);
+            separationY -= dy / Math.max(dist / h, 0.001);
+          }
+        }
+      }
+
+      if (neighbors > 0) {
+        cohesionX /= neighbors;
+        cohesionY /= neighbors;
+      }
+
+      gx += cohesionX * 0.5 + separationX * 0.8;
+      gy += cohesionY * 0.5 + separationY * 0.8;
+
+      // Keep the small swarm in open water.  Scene obstacles are screen-space
+      // circles; convert them once here so tadpoles never disappear beneath a
+      // rock or the foreground plant cluster.
+      for (const ob of (scene.tadpoleObstacles || scene.obstacles || scene.sim?.obstacles || [])) {
+        const ox = ob.x / w, oy = ob.y / h, rr = (ob.r + 18) / Math.min(w, h);
+        const dx = t.x - ox, dy = t.y - oy, d = Math.hypot(dx, dy);
+        if (d < rr) {
+          const inv = 1 / Math.max(d, .001), push = (rr - d) / rr;
+          gx += dx * inv * push * 2.4;
+          gy += dy * inv * push * 2.4;
+        }
+      }
+
+      // Keep the school in open water and out of the translucent control stack.
+      const bounds = scene.tadpoleBounds || { minX: .1, maxX: .9, minY: .1, maxY: .9 };
+      if (t.x < bounds.minX) gx += (bounds.minX - t.x) * 4;
+      if (t.x > bounds.maxX) gx -= (t.x - bounds.maxX) * 4;
+      if (t.y < bounds.minY) gy += (bounds.minY - t.y) * 4;
+      if (t.y > bounds.maxY) gy -= (t.y - bounds.maxY) * 4;
+
+      const len = Math.hypot(gx, gy) || 0.001;
+      t.vx += (gx / len * t.speed - t.vx) * Math.min(1, dt * 3);
+      t.vy += (gy / len * t.speed - t.vy) * Math.min(1, dt * 3);
+
+      t.x += t.vx * dt;
+      t.y += t.vy * dt;
+      t.x = Math.max(bounds.minX, Math.min(bounds.maxX, t.x));
+      t.y = Math.max(bounds.minY, Math.min(bounds.maxY, t.y));
+
+      // Steering is intentionally soft, but the final integration pass must be
+      // hard: a large frame or a freshly laid-out foreground object must never
+      // leave a tadpole inside a rock or beneath a floating leaf/flower.
+      for (const ob of (scene.tadpoleObstacles || scene.obstacles || scene.sim?.obstacles || [])) {
+        const ox = ob.x / w, oy = ob.y / h;
+        const rr = (ob.r + 12) / Math.min(w, h);
+        const dx = t.x - ox, dy = t.y - oy, d = Math.hypot(dx, dy);
+        if (d < rr) {
+          const inv = 1 / Math.max(d, .001);
+          t.x = Math.max(bounds.minX, Math.min(bounds.maxX, ox + dx * inv * rr));
+          t.y = Math.max(bounds.minY, Math.min(bounds.maxY, oy + dy * inv * rr));
+          t.vx *= .35;
+          t.vy *= .35;
+        }
+      }
+    }
+
+    return false; // 未删除
+  }
+
+  onFrogCall(frogPos) {
+    this.frogPos = frogPos;
+    this.frogCallTime = 2; // 2秒内必须响应
+  }
+
+  onMouseDisturb(mx, my, w, h) {
+    const avgDist = this.tadpoles.reduce((sum, t) =>
+      sum + Math.hypot(t.x * w - mx, t.y * h - my), 0) / this.tadpoles.length;
+    if (avgDist < 120) {
+      this.panicUntil = Date.now() / 1000 + 3;
+    }
+  }
+}
+  const api={PALETTES,SILVER_CARP,POND_MATERIALS,normalizePondMaterial,fishPalette,createSilverCarpShoal,BODY,randomSeed,weatherFromCode,clamp,normalizeCardOpacity,normalizeSeasonMode,seasonForMonth,resolveSeason,growthScaleForEaten,fishRenderSize,normalizeForecast,wrap,createFish,updateSpine,fishPose,PondSimulation,TadpoleSwarm,sanitizeSave};
   if(typeof module!=='undefined'&&module.exports)module.exports=api;
   else root.PondCore=api;
 })(typeof window!=='undefined'?window:globalThis);

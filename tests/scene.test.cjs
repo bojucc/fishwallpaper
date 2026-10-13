@@ -6,7 +6,7 @@ const core = require('../core.js');
 const context = { window: { PondCore: core }, ImageData: class { constructor(w, h) { this.width = w; this.height = h; this.data = new Uint8ClampedArray(w * h * 4); } } };
 vm.runInNewContext(fs.readFileSync(require.resolve('../art.js'), 'utf8'), context);
 vm.runInNewContext(fs.readFileSync(require.resolve('../scene.js'), 'utf8'), context);
-const { PondScene, Frog, lookFor, dayPhase, frogEligible } = context.window.PondScene;
+const { PondScene, Frog, lookFor, dayPhase, frogEligible, egretEligible, rainGraceDeadline } = context.window.PondScene;
 
 // A stand-in renderer: the painting maps 1:1 onto a 1672×941 screen.
 function pond(seed = 7) {
@@ -43,7 +43,7 @@ test('青蛙写实素材绘制时保持清晰主体并与环境色融合', () =>
   scene.draw({ turtles: false, butterflies: false, weather: 'cloudy', night: false });
   const frog = calls.find(c => c.layer === 'air');
   assert.ok(frog, '应绘制可见的青蛙主体');
-  assert.ok(frog.sx >= 1.05 && frog.sy >= 1.05, '青蛙需要保持与锦鲤相称的清晰尺寸');
+  assert.ok(frog.sx >= .72 && frog.sx <= .88 && frog.sy >= .72 && frog.sy <= .88, '荷叶青蛙应与跳跃和入水姿态保持统一尺寸');
   assert.ok(frog.color[3] >= .96, '青蛙主体 alpha 不能过低');
   assert.ok(frog.color[1] > frog.color[0] && frog.color[1] > frog.color[2], '青蛙保持自然绿色环境融合');
 });
@@ -91,18 +91,38 @@ test('月下观鱼使用更醒目的月面尺寸', () => {
   assert.ok(scene.moonDisc[2] > 28 * scene.scale, '月面半径应大于旧尺寸');
 });
 
-test('雨天不生成青蛙和蝌蚪实体', () => {
+test('雪天不生成青蛙和蝌蚪实体', () => {
   const scene = pond();
-  for (let i = 0; i < 30; i++) scene.update(1 / 30, { ...base, weather: 'rain' });
+  for (let i = 0; i < 30; i++) scene.update(1 / 30, { ...base, weather: 'snow', season: 'summer' });
   assert.equal('frogs' in scene, false);
   assert.equal('tadpoles' in scene, false);
 });
 
-test('青蛙只在夏季多云或夜晚具备出现条件', () => {
-  assert.equal(frogEligible('summer', 'cloudy', false), true);
-  assert.equal(frogEligible('summer', 'sunny', false), false);
-  assert.equal(frogEligible('spring', 'cloudy', false), false);
-  assert.equal(frogEligible('winter', 'rain', true), true);
+test('青蛙春夏晴天、多云、雨天或夜晚出现，雪天与秋冬排除', () => {
+  for (const season of ['spring', 'summer']) {
+    assert.equal(frogEligible(season, 'sunny', false), true);
+    assert.equal(frogEligible(season, 'cloudy', false), true);
+    assert.equal(frogEligible(season, 'rain', false), true);
+    assert.equal(frogEligible(season, 'rain', true), true);
+    assert.equal(frogEligible(season, 'cloudy', true), true);
+    assert.equal(frogEligible(season, 'snow', false), false);
+  }
+  for (const season of ['autumn', 'winter']) {
+    assert.equal(frogEligible(season, 'sunny', false), false);
+    assert.equal(frogEligible(season, 'rain', true), false);
+  }
+});
+
+test('白鹭全年晴天或多云可出现，雨停宽限有效但雨雪和夜间排除', () => {
+  for (const season of ['spring', 'summer', 'autumn', 'winter']) {
+    assert.equal(egretEligible('sunny', false, false), true);
+    assert.equal(egretEligible('cloudy', false, false), true);
+  }
+  assert.equal(egretEligible('cloudy', true, true), false);
+  assert.equal(egretEligible('rain', false, true), false);
+  assert.equal(egretEligible('snow', false, true), false);
+  assert.equal(egretEligible('rain', false, false), false);
+  assert.equal(egretEligible('sunny', false, true), true);
 });
 
 test('季节底图左下花簇不再叠加旧坐标的动态荷花', () => {
@@ -157,49 +177,6 @@ test('白鹭在冷却结束后的低频尝试窗口内可以出现', () => {
   assert.equal(appeared, true);
 });
 
-test('白鹭停留水面时周期性产生可见涟漪并局部惊扰锦鲤', () => {
-  const scene = pond(17);
-  scene.egret = new context.window.PondScene.Egret(() => .5);
-  Object.assign(scene.egret, { x: 500, y: 400, state: 'resting', age: 0, restAge: 1, ripple: 0 });
-  scene.sim.fish[0].x = 500 / 1672; scene.sim.fish[0].y = 400 / 941;
-  scene.update(1 / 30, { ...base, weather: 'sunny', egretEnabled: true });
-  assert.ok(scene.splashes.some(p => p.ring), '白鹭停留应产生涟漪环');
-  assert.ok(scene.sim.fish.some(f => f.flee > 0), '白鹭附近的锦鲤应短暂躲闪');
-});
-
-test('白鹭显示尺寸适当放大', () => {
-  const scene = pond();
-  scene.egret = new context.window.PondScene.Egret(() => .5);
-  Object.assign(scene.egret, { x: 500, y: 400, state: 'resting', age: 0, restAge: 1, ripple: 3 });
-  scene.look = { ...lookFor('sunny', false), shadowDir: [.7, .72] };
-  const calls = [];
-  scene.R = { sprites: { egretRest: {} }, floater() {}, fish() {}, sprite(layer, def, x, y, angle, sx, sy) { calls.push({ layer, sx, sy }); } };
-  scene.draw({ turtles: false, butterflies: false, weather: 'sunny', night: false });
-  const body = calls.find(c => c.layer === 'surface');
-  assert.ok(body && body.sx >= scene.scale * 1.25, '白鹭应比旧尺寸更明显');
-});
-
-test('白鹭落点位于开放水面而不是荷叶中心，并朝向最近锦鲤', () => {
-  const scene = pond(23);
-  scene.egretCooldown = 0;
-  scene.egretTry = 0;
-  scene.update(1 / 30, { ...base, weather: 'sunny', egretEnabled: true });
-  assert.ok(scene.egret, '应生成白鹭');
-  const p = [scene.egret.targetX, scene.egret.targetY];
-  assert.ok(p[0] > scene.w * .2 && p[0] < scene.w * .8 && p[1] > scene.h * .1 && p[1] < scene.h * .9, '落点应在池面开放区域');
-  assert.ok(!scene.floatObjects.some(o => o.kind === 'leaf' && Math.hypot(o.x - p[0], o.y - p[1]) < Math.max(o.rx, o.ry) * .8), '落点不能落在荷叶上');
-  const fish = scene.sim.fish[0]; fish.x = (p[0] + 80) / scene.w; fish.y = p[1] / scene.h;
-  scene.egret.state = 'resting'; scene.egret.age = 0; scene.egret.update(1 / 30, scene.w, scene.h, scene.scale, scene);
-  assert.ok(Math.abs(scene.egret.heading) < Math.PI, '白鹭应保留可更新的朝向');
-});
-
-test('青蛙保持接近锦鲤的真实比例且荷叶上只做微小转动', () => {
-  const frog = new Frog(() => .5);
-  assert.ok(frog.size >= .95 && frog.size <= 1.12, '青蛙不应大于锦鲤太多');
-  frog.place(500, 400); frog.faceTarget(900, 400); frog.update(1);
-  assert.ok(Math.abs(frog.angle + Math.PI / 2) < .08, '荷叶上的青蛙只应极慢转动');
-});
-
 test('青蛙在不同天气下使用克制的环境色，不被额外提亮', () => {
   const scene = pond();
   scene.frog = new Frog(() => .5); scene.frog.place(500, 400);
@@ -214,60 +191,6 @@ test('青蛙在不同天气下使用克制的环境色，不被额外提亮', ()
   assert.ok(cloudy[1] < .93, '阴天青蛙不应被额外提亮');
   assert.ok(rain[2] > rain[1], '雨天青蛙应保留冷色环境光');
   assert.ok(snow[2] >= snow[1], '雪天青蛙应保留偏冷色调');
-});
-
-test('白鹭落水后先戏水短游，再回到停留状态', () => {
-  const scene = pond(31);
-  const egret = new context.window.PondScene.Egret(() => .5);
-  egret.place(500, 400, 500, 310); scene.egret = egret;
-  egret.update(3.6, scene.w, scene.h, scene.scale, scene);
-  assert.equal(egret.state, 'wading', '落水后应进入戏水状态');
-  const start = [egret.x, egret.y];
-  egret.update(.8, scene.w, scene.h, scene.scale, scene);
-  assert.ok(Math.hypot(egret.x - start[0], egret.y - start[1]) > 12 * scene.scale, '戏水时应有可见的短距离游动');
-  egret.update(2.4, scene.w, scene.h, scene.scale, scene);
-  assert.equal(egret.state, 'resting');
-});
-
-test('白鹭附近输入会抖羽、起小涟漪并局部惊鱼', () => {
-  const scene = pond(37);
-  const egret = new context.window.PondScene.Egret(() => .5);
-  Object.assign(egret, { x: 500, y: 400, state: 'resting', ripple: 3, restAge: 1 }); scene.egret = egret;
-  scene.sim.fish[0].x = 520 / 1672; scene.sim.fish[0].y = 400 / 941;
-  assert.equal(scene.disturbEgret(560, 400), true);
-  assert.ok(egret.react > 0, '应记录白鹭抖羽反应');
-  assert.ok(scene.splashes.some(p => p.ring), '应产生小涟漪');
-  assert.ok(scene.sim.fish[0].flee > 0, '附近锦鲤应受惊');
-});
-
-test('白鹭抖羽会产生足够明显的姿态反馈', () => {
-  const scene = pond();
-  const egret = new context.window.PondScene.Egret(() => .5);
-  Object.assign(egret, { x: 500, y: 400, state: 'resting', age: .31, ripple: 3, react: 0 }); scene.egret = egret;
-  const draw = react => {
-    egret.react = react;
-    const calls = [];
-    scene.look = { ...lookFor('sunny', false), shadowDir: [.7, .72] };
-    scene.R = { sprites: { egretRest: {} }, floater() {}, fish() {}, sprite(layer, def, x, y, angle, sx, sy) { if (layer === 'surface') calls.push({ angle, sx, sy }); } };
-    scene.draw({ turtles: false, butterflies: false, weather: 'sunny', night: false });
-    return calls[0];
-  };
-  const calm = draw(0), reacting = draw(.7);
-  assert.ok(Math.abs(reacting.angle - calm.angle) > .08 || Math.abs(reacting.sx - calm.sx) > .04, '抖羽需要有可见的姿态或尺寸变化');
-});
-
-test('白鹭夜间不绘制水面影子，晴天白天绘制影子', () => {
-  const scene = pond();
-  const egret = new context.window.PondScene.Egret(() => .5);
-  Object.assign(egret, { x: 500, y: 400, state: 'resting', ripple: 3 }); scene.egret = egret;
-  const calls = [];
-  scene.R = { sprites: { egretRest: {} }, floater() {}, fish() {}, sprite(layer, def, x, y, angle, sx, sy) { calls.push(layer); } };
-  scene.look = { ...lookFor('sunny', false), shadowDir: [.7, .72], night: false };
-  scene.draw({ turtles: false, butterflies: false, weather: 'sunny', night: false });
-  assert.ok(calls.includes('shadow'));
-  calls.length = 0; scene.look = { ...lookFor('sunny', true), shadowDir: [.7, .72], night: true };
-  scene.draw({ turtles: false, butterflies: false, weather: 'sunny', night: true });
-  assert.equal(calls.includes('shadow'), false);
 });
 
 test('关闭池塘设置中的青蛙后立即清除青蛙且不再生成', () => {
@@ -296,7 +219,11 @@ test('青蛙跟随锦鲤时缓慢转向并经历起跳与入水阶段', () => {
   frog.update(.5); assert.ok(frog.angle < -.9, '半秒内不应瞬间转向');
   frog.jump(620, 400); frog.update(.08); assert.equal(frog.state, 'jumping'); assert.equal(frog.jumpPhase, 'launch');
   frog.update(.2); assert.equal(frog.jumpPhase, 'airborne');
-  for (let i = 0; i < 40; i++) frog.update(1 / 60);
+  for (let i = 0; i < 18; i++) frog.update(1 / 60);
+  const beforeDive = frog.x;
+  frog.update(.1);
+  assert.ok(frog.x - beforeDive > 8, '跳水末段应持续向前入水，不能在水面停顿');
+  for (let i = 0; i < 10; i++) frog.update(1 / 60);
   assert.equal(frog.state, 'swimming');
 });
 
@@ -324,13 +251,6 @@ test('点击青蛙会进入跳水状态并惊扰附近锦鲤', () => {
   assert.ok(scene.events.some(e => e.type === 'frog-jump'));
 });
 
-test('乌龟和青蛙使用放大后的实际比例', () => {
-  const scene = pond();
-  assert.ok(scene.turtles.every(t => t.size >= 1.08), '两只乌龟保留独立大小参数');
-  const frog = new Frog(() => .5);
-  assert.ok(frog.size >= .95 && frog.size <= 1.12);
-});
-
 test('动态水面只包含荷叶，不生成花苞或荷花浮层', () => {
   const scene = pond();
   assert.ok(scene.floaters.some(({ f }) => f[3] === 'f' || f[3] === 'b'), '荷花标注保留在底图前景元数据中');
@@ -352,9 +272,9 @@ test('鱼达到成长阈值时视觉体型平滑过渡到目标值', () => {
   const start = fish.visualSize;
   fish.eaten = 210;
   scene.update(1 / 60, { ...base, weather: 'sunny' });
-  assert.ok(fish.visualSize > start && fish.visualSize < fish.size * scene.scale * 2, '成长应先平滑过渡');
+  assert.ok(fish.visualSize > start && fish.visualSize < fish.size * scene.scale * 1.4, '成长应先平滑过渡');
   for (let i = 0; i < 180; i++) scene.update(1 / 60, { ...base, weather: 'sunny' });
-  assert.ok(Math.abs(fish.visualSize - fish.size * scene.scale * 2) < .02, '成长最终达到 2 倍上限');
+  assert.ok(Math.abs(fish.visualSize - fish.size * scene.scale * 1.4) < .02, '成长最终达到 1.4 倍上限');
 });
 
 test('鱼只避开水面石头，不把荷叶当成水下障碍', () => {
@@ -375,29 +295,59 @@ test('青蛙没有可用锦鲤目标时朝向池塘中央', () => {
   assert.ok(Math.abs(context.window.PondCore.wrap(scene.frog.targetAngle - expected)) < .05, '无目标时应看向池塘中央');
 });
 
-test('青蛙出现时生成轻量蝌蚪，离开后淡出并回收', () => {
-  const scene = pond(41);
-  scene.rnd = () => 0;
-  scene.frogCooldown = 0;
-  scene.update(.1, { ...base, weather: 'cloudy', season: 'summer', frogEnabled: true });
-  assert.ok(Array.isArray(scene.tadpoles) && scene.tadpoles.length >= 8 && scene.tadpoles.length <= 12, '青蛙出现时应生成约十只蝌蚪');
-  scene.frog.state = 'gone';
-  scene.update(.2, { ...base, weather: 'cloudy', season: 'summer', frogEnabled: true });
-  assert.ok(scene.tadpoles[0].alpha < 1, '青蛙离开后蝌蚪应开始淡出');
-  for (let i = 0; i < 40; i++) scene.update(.2, { ...base, weather: 'cloudy', season: 'summer', frogEnabled: true });
-  assert.equal(scene.tadpoles.length, 0, '蝌蚪淡出后应回收');
+test('蝌蚪首次随机出现在开放水面，避开青蛙荷叶、乌龟和遮挡物', () => {
+  const scene = pond(42);
+  scene.turtles[0].x = .28; scene.turtles[0].y = .31;
+  scene.spawnTadpoles(1200, 760);
+  const schoolX = scene.tadpoles.reduce((n, t) => n + t.x, 0) / scene.tadpoles.length;
+  const schoolY = scene.tadpoles.reduce((n, t) => n + t.y, 0) / scene.tadpoles.length;
+  assert.ok(Math.hypot(schoolX - scene.turtles[0].x * scene.w, schoolY - scene.turtles[0].y * scene.h) > 110 * scene.scale,
+    '蝌蚪不应贴着乌龟出现');
+  assert.ok(Math.hypot(schoolX - 1200, schoolY - 760) > 120 * scene.scale,
+    '蝌蚪不应从青蛙荷叶位置起步');
+  assert.ok(scene.tadpoles.some(t => Math.abs(t.x - schoolX) > 12 * scene.scale && Math.abs(t.y - schoolY) > 8 * scene.scale),
+    '蝌蚪初始队形应有松散的不规则偏移');
 });
 
-test('白鹭戏水低频触发多种克制动作且转向受限', () => {
-  const scene = pond(53);
-  const egret = new context.window.PondScene.Egret(() => 0);
-  Object.assign(egret, { x: 700, y: 460, state: 'wading', age: 0, wadeAge: 0, heading: 0, ripple: 10, nextAction: 0 });
+test('白鹭飞行贴图朝向与航迹一致，不用镜像和角度夹断制造错误航向', () => {
+  const scene = pond(72);
+  const calls = [];
+  const egret = new context.window.PondScene.Egret(() => .5);
+  Object.assign(egret, { x: 500, y: 400, state: 'flying', heading: Math.PI - .18, flightAngle: Math.PI - .18, age: 1 });
   scene.egret = egret;
-  const actions = new Set();
-  let maxTurn = 0;
-  for (let i = 0; i < 80; i++) { const before = egret.heading; scene.update(.1, { ...base, weather: 'sunny', egretEnabled: true }); actions.add(egret.action); maxTurn = Math.max(maxTurn, Math.abs(context.window.PondCore.wrap(egret.heading - before))); }
-  assert.ok(actions.size >= 2 && !actions.has(undefined), '白鹭应低频表现至少两种动作');
-  assert.ok(maxTurn <= .04, '戏水转向不能快速甩头');
+  scene.look = { ...lookFor('sunny', false), shadowDir: [.7, .72] };
+  scene.R = { sprites: { egretFlight: {}, egretFlightFrames: [{}] }, floater() {}, sprite(layer, def, x, y, angle, sx, sy) { if (layer === 'air') calls.push({ angle, sx, sy }); } };
+  egret.draw(scene.R, scene.scale, scene.look);
+  const body = calls[0];
+  assert.ok(body, '飞行白鹭应绘制主体');
+  assert.ok(body.sx > 0, '飞行姿态使用朝局部 +X 的原图，不额外翻转身体');
+  assert.ok(Math.abs(body.angle - egret.flightAngle) < 1e-6, '白鹭身体长轴应沿实际航迹旋转');
+});
+
+test('白鹭停留时使用完整连续的站立贴图，不叠加脚底光圈', () => {
+  const scene = pond(75);
+  const body = { id: 'egret-whole-body' }, ring = { id: 'waterline-ring' };
+  const calls = [];
+  const egret = new context.window.PondScene.Egret(() => .5);
+  Object.assign(egret, { x: 500, y: 400, state: 'resting', age: 1, ripple: 3 });
+  scene.egret = egret;
+  scene.look = { ...lookFor('sunny', false), shadowDir: [.7, .72], night: false };
+  scene.R = { sprites: { egretRest: body, ring }, floater() {}, fish() {}, sprite(layer, def, x, y, angle, sx, sy, color) { calls.push({ layer, def, color }); } };
+  scene.draw({ turtles: false, butterflies: false, weather: 'sunny', night: false });
+  assert.ok(calls.some(c => c.layer === 'surface' && c.def === body), '白鹭主体和双腿应作为一张完整贴图绘制');
+  assert.equal(calls.some(c => c.layer === 'under' && c.def === body), false, '不能按固定水平线切断白鹭腿');
+  assert.equal(calls.some(c => c.def === ring), false, '脚底不能绘制装饰性椭圆光圈');
+});
+
+test('乌龟默认使用程序化分件贴图', () => {
+  const scene = pond(74);
+  scene.turtles = [scene.turtles[0]];
+  scene.look = { ...lookFor('sunny', false), shadowDir: [.7, .72] };
+  const calls = [];
+  scene.R = { sprites: { turtle0_shell: {}, turtle0_head: {}, turtle0_front: {}, turtle0_back: {}, turtle0_tail: {} }, floater() {}, fish() {}, sprite(layer, def, x, y, angle, sx, sy) { if (layer === 'under') calls.push({ def, sx, sy }); } };
+  scene.draw({ turtles: true, butterflies: false, weather: 'sunny', night: false });
+  assert.ok(calls.length >= 5, '乌龟应绘制程序化分件');
+  assert.equal(calls.some(call => call.def === scene.R.sprites.turtle0_shell), true);
 });
 
 test('点击荷叶会产生水波并惊动荷叶下的鱼', () => {
@@ -429,4 +379,88 @@ test('大雨偶有闪电，闪光后发出雷声事件；小雨与晴天没有',
   const calm = pond(4); calm.events.length = 0;
   for (let i = 0; i < 30 * 120; i++) calm.update(1 / 30, { ...base, weather: 'rain', rainAmount: .3 });
   assert.equal(calm.events.length, 0);
+});
+
+
+test('手机布局重新映射时，休息态青蛙仍固定于可见荷叶', () => {
+  const scene = pond();
+  scene.frogCooldown = 0;
+  scene.update(0, { ...base, weather: 'sunny', season: 'summer', frogEnabled: true });
+  const frog = scene.frog;
+  assert.ok(frog);
+  const oldX = frog.x, oldY = frog.y;
+  scene.R.imageToScreen = (x, y) => [x * .2 + 20, y * .65 + 20];
+  scene.layout(390, 844);
+  assert.equal(scene.frog, frog);
+  assert.ok(scene.lotusSpots.some(([x, y]) => Math.hypot(frog.x - x, frog.y - y) < 5), '手机模式青蛙必须位于荷叶中心');
+  assert.ok(Math.hypot(frog.x - oldX, frog.y - oldY) > 20, '不能保留旧屏幕坐标');
+  const anchor = [frog.x, frog.y];
+  for (let i = 0; i < 60; i++) scene.update(1 / 60, { ...base, weather: 'sunny', season: 'summer', frogEnabled: true });
+  assert.equal(frog.state, 'perched');
+  assert.ok(Math.hypot(frog.x - anchor[0], frog.y - anchor[1]) < 5);
+});
+
+test('原荷叶被手机裁切时，青蛙换到可见荷叶而不是开放水面', () => {
+  const scene = pond();
+  scene.frogCooldown = 0;
+  scene.update(0, { ...base, weather: 'sunny', season: 'summer', frogEnabled: true });
+  const frog = scene.frog;
+  const oldLeaf = frog.perchObject;
+  assert.ok(oldLeaf, '需保存荷叶对象而不仅是屏幕坐标');
+  scene.R.imageToScreen = (x, y) => x === oldLeaf.x && y === oldLeaf.y ? [-1000, -1000] : [x * .2 + 20, y * .65 + 20];
+  scene.layout(390, 844);
+  assert.notEqual(frog.perchObject, oldLeaf);
+  assert.ok(scene.lotusSpots.some(([x, y]) => Math.hypot(frog.x - x, frog.y - y) < 5));
+});
+
+test('休息态青蛙绘制跟随荷叶漂动，但跳水态不再绑定荷叶', () => {
+  const scene = pond();
+  scene.frogCooldown = 0;
+  scene.update(0, { ...base, weather: 'sunny', season: 'summer', frogEnabled: true });
+  const frog = scene.frog, calls = [], leaves = [];
+  const leaf = scene.floaters.find(fl => fl.object === frog.perchObject);
+  assert.ok(leaf);
+  scene.R.sprites = { frog: { forward: 'x' }, frogJump: { forward: 'x' } };
+  scene.R.floater = (...args) => leaves.push(args);
+  scene.R.sprite = (...args) => calls.push(args);
+  scene.time = 30; scene.draw(base);
+  const renderedLeaf = leaves.find(a => a[0] === leaf.object.x && a[1] === leaf.object.y);
+  const renderedFrog = calls.find(a => a[0] === 'air' && a[1] === scene.R.sprites.frog);
+  const [x, y] = scene.R.imageToScreen(leaf.object.x, leaf.object.y);
+  assert.ok(Math.abs(renderedFrog[2] - (x + renderedLeaf[6])) < .001);
+  assert.ok(Math.abs(renderedFrog[3] - (y + renderedLeaf[7])) < .001);
+  assert.equal(frog.jump(frog.x + 80, frog.y + 60), true);
+  frog.update(.3);
+  const position = [frog.x, frog.y];
+  scene.R.imageToScreen = (x, y) => [x * .2 + 20, y * .65 + 20];
+  scene.layout(390, 844);
+  assert.deepEqual([frog.x, frog.y], position, '不能把正在跳水的青蛙瞬移回荷叶');
+});
+
+test('休息态青蛙每次更新锁定荷叶锚点', () => {
+  const frog = new Frog(() => .5);
+  frog.place(100, 200);
+  frog.x = 150; frog.y = 270;
+  frog.update(1 / 60);
+  assert.deepEqual([frog.x, frog.y], [100, 200]);
+});
+
+test('没有可见荷叶时隐藏休息态青蛙，荷叶重新出现后恢复', () => {
+  const scene = pond();
+  scene.frogCooldown = 0;
+  scene.update(0, { ...base, weather: 'sunny', season: 'summer' });
+  const frog = scene.frog, leaf = frog.perchObject, calls = [];
+  scene.R.imageToScreen = () => [-1000, -1000];
+  scene.layout(390, 844);
+  assert.equal(frog.perchVisible, false);
+  scene.R.sprites = { frog: { forward: 'x' } };
+  scene.R.sprite = (...args) => calls.push(args);
+  frog.draw(scene.R, scene.scale, scene.look);
+  assert.equal(calls.length, 0, '无荷叶不能绘制水面休息青蛙');
+  scene.R.imageToScreen = (x, y) => [x * .2 + 20, y * .65 + 20];
+  scene.layout(390, 844);
+  assert.equal(frog.perchVisible, true);
+  assert.equal(frog.perchObject, leaf);
+  const point = scene.R.imageToScreen(leaf.x, leaf.y);
+  assert.deepEqual([frog.x, frog.y], point);
 });

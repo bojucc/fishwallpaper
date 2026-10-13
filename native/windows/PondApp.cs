@@ -24,7 +24,7 @@ namespace BichiPond
         private readonly ShellWatcher shell;
         private CoreWebView2Environment env;
         private InteractiveForm window;
-        private bool userPaused, locked, rebuilding, quitting, soundOn;
+        private bool userPaused, locked, rebuilding, quitting, soundOn, opening;
         private string weather = "sunny";
         private bool night;
         // Taps on the desktop, seen through a low-level mouse hook (the desktop icons layer takes the real clicks).
@@ -37,7 +37,11 @@ namespace BichiPond
         {
             shell = new ShellWatcher(() => Rebuild(1500));
             BuildTray();
-            watch.Tick += (s, e) => UpdateVisibility();
+            watch.Tick += (s, e) =>
+            {
+                if (AnyWallpaperLost()) { Rebuild(200); return; }
+                UpdateVisibility();
+            };
             SystemEvents.DisplaySettingsChanged += (s, e) => Rebuild(800);
             SystemEvents.SessionSwitch += (s, e) =>
             {
@@ -91,7 +95,7 @@ namespace BichiPond
             {
                 var wall = new WallpaperForm(screen);
                 walls.Add(wall);
-                await wall.Start(env, OnSave);
+                await wall.Start(env, OnSave, OnProcessFailed);
             }
             UpdateVisibility();
         }
@@ -105,6 +109,20 @@ namespace BichiPond
             try { await BuildWallpapers(); }
             catch (Exception ex) { Report("桌面壁纸重建失败", ex); }
             finally { rebuilding = false; }
+        }
+
+        private void OnProcessFailed(WebView2 view, CoreWebView2ProcessFailedKind kind)
+        {
+            Note($"WebView2 进程失败：{kind}");
+            if (kind != CoreWebView2ProcessFailedKind.BrowserProcessExited) return;
+            Rebuild(200);
+        }
+
+        private bool AnyWallpaperLost()
+        {
+            if (rebuilding || opening || walls.Count == 0) return false;
+            foreach (var w in walls) if (w.View?.CoreWebView2 == null) return true;
+            return window != null && !window.IsDisposed && window.View?.CoreWebView2 == null;
         }
 
         private IEnumerable<WebView2> Views => walls.Select(w => w.View).Concat(new[] { window?.View }).Where(v => v?.CoreWebView2 != null);
@@ -203,6 +221,12 @@ namespace BichiPond
             MessageBox.Show($"{what}：{ex.Message}\n\n详细信息已记录在：\n{log}", "碧池观鱼", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
 
+        private static void Note(string what)
+        {
+            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BichiPond"), log = Path.Combine(dir, "error.log");
+            try { Directory.CreateDirectory(dir); File.AppendAllText(log, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {what} (Windows {Environment.OSVersion.Version})\r\n\r\n"); } catch (Exception) { }
+        }
+
         // ---------- tray ----------
         private void BuildTray()
         {
@@ -245,7 +269,9 @@ namespace BichiPond
             if (window != null && !window.IsDisposed) { window.WindowState = window.WindowState == FormWindowState.Minimized ? FormWindowState.Normal : window.WindowState; window.Activate(); return; }
             window = new InteractiveForm();
             window.FormClosed += (s, e) => { window = null; };
-            await window.Start(env, OnSave);
+            opening = true;
+            try { await window.Start(env, OnSave, OnProcessFailed); }
+            finally { opening = false; }
         }
 
         private static bool IsStartup()

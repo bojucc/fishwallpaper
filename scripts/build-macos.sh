@@ -29,7 +29,7 @@ plutil -lint -s "$CONTENTS/Info.plist"
 for f in index.html app.js core.js art.js gl.js scene.js audio.js style.css; do
   cp "$ROOT/$f" "$CONTENTS/Resources/$f"
 done
-cp "$ROOT/assets/pond.jpg" "$ROOT/assets/pondchun.png" "$ROOT/assets/pondxia.png" "$ROOT/assets/pondqiu.png" "$ROOT/assets/ponddong.png" "$ROOT/assets/pondchun-foreground.png" "$ROOT/assets/pondxia-foreground.png" "$ROOT/assets/pondqiu-foreground.png" "$ROOT/assets/ponddong-foreground.png" "$ROOT/assets/frog.png" "$ROOT/assets/turtle.png" "$ROOT/assets/egret-flight.png" "$ROOT/assets/egret-rest.png" "$ROOT/assets/pond-data.js" "$ROOT/assets/favicon.svg" "$CONTENTS/Resources/assets/"
+cp "$ROOT/assets/pond.jpg" "$ROOT/assets/pondchun.png" "$ROOT/assets/pondxia.png" "$ROOT/assets/pondqiu.png" "$ROOT/assets/ponddong.png" "$ROOT/assets/pondchun-foreground.png" "$ROOT/assets/pondxia-foreground.png" "$ROOT/assets/pondqiu-foreground.png" "$ROOT/assets/ponddong-foreground.png" "$ROOT/assets/frog.png" "$ROOT/assets/egret-flight.png" "$ROOT/assets/egret-rest.png" "$ROOT/assets/pond-data.js" "$ROOT/assets/favicon.svg" "$CONTENTS/Resources/assets/"
 
 echo "▸ Generating app icon…"
 # assets/app-icon.png: 1024 px, drawn on Apple's icon grid (824 px rounded square with its own shadow).

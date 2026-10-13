@@ -24,21 +24,17 @@ test('季节背景有前景遮罩，鱼可从荷叶荷花下方游过',()=>{
   assert.match(fs.readFileSync('style.css','utf8'),/\.pond-foreground/);
 });
 
-test('写实青蛙 PNG 被接入且有程序回退',()=>{
-  assert.ok(fs.existsSync(path.join('assets','frog.png')));
-  assert.match(appSource,/assets\/frog\.png/);
-  assert.ok(fs.existsSync(path.join('assets','turtle.png')));
-  assert.match(appSource,/assets\/turtle\.png/);
-  assert.match(fs.readFileSync('art.js','utf8'),/miscSprites\(frogOverride/);
-});
-
-test('白鹭素材包含飞行与停留两种姿态并接入加载流程',()=>{
-  for(const file of ['egret-flight.png','egret-rest.png']){
-    assert.ok(fs.existsSync(path.join('assets',file)),`${file} exists in source assets`);
-    assert.match(appSource,new RegExp(file.replace('.','\\.')));
-  }
-  assert.match(fs.readFileSync('art.js','utf8'),/egretFlightOverride/);
-  assert.match(appSource,/PondArt\.miscSprites\(/);
+test('青蛙和白鹭使用 png 动作素材并保留程序化回退，乌龟使用程序化分件',()=>{
+  assert.ok(fs.existsSync(path.join('png','frog-rest.png')));
+  assert.match(appSource,/\['assets\/frog-rest\.png',8\]/);
+  assert.doesNotMatch(appSource,/assets\/turtle\.png/);
+  assert.doesNotMatch(fs.readFileSync('art.js','utf8'),/turtleReal/);
+  assert.match(appSource,/\['assets\/frog-jump\.png',8\]/);
+  assert.match(appSource,/\['assets\/frog-land\.png',8\]/);
+  assert.match(appSource,/\['assets\/frog-swim\.png',8\]/);
+  assert.match(appSource,/\['assets\/egret-flight\.png',7\]/);
+  assert.match(appSource,/\['assets\/egret-rest\.png',7\]/);
+  assert.match(fs.readFileSync('art.js','utf8'),/frogJump: frogSprite/);
 });
 
 test('前景遮罩不把荷花和花瓣复制到动态层',()=>{
@@ -56,19 +52,13 @@ test('四季前景默认关闭，水体仍共享统一浮物标注',()=>{
 });
 
 test('白鹭只在晴天或多云低频出现',()=>{
-  assert.match(fs.readFileSync('scene.js','utf8'),/egretEligible/);
-  assert.match(fs.readFileSync('scene.js','utf8'),/weather !== 'rain' && weather !== 'snow'/);
-});
-
-test('鼠标划过和投喂路径都会通知白鹭附近扰动',()=>{
-  assert.match(appSource,/pointermove/);
-  assert.match(appSource,/pointermove',e=>\{if\(scene\?\.disturbEgret\(e\.clientX,e\.clientY\)/, '鼠标划过不能依赖按住按钮');
-  assert.match(appSource,/disturbEgret/);
-  assert.match(appSource,/!feedMode&&scene\.hitEgret/);
-});
+  assert.match(scene,/function egretEligible\(weather, night\)/);
+  assert.match(scene,/weather !== 'rain' && weather !== 'snow'/);
+  assert.match(scene,/function frogEligible\(season, weather, night\)/);
+});;
 
 test('WebGL 和 2D renderer 都提供底图热替换接口',()=>{
-  assert.match(gl,/setBedImage\(image\)/);
+  assert.match(gl,/setBedImage\(image, mask\)/);
   assert.match(gl,/kind: 'webgl2'/);
   assert.match(gl,/kind: '2d'/);
 });
@@ -96,15 +86,8 @@ test('静态和 Native Windows/macOS/Android 构建都包含四张季节图片',
 test('首帧渲染前隐藏应用层，避免启动底图闪屏',()=>{
   assert.match(html, /<body class="app-loading">/);
   assert.match(css, /body\.app-loading\s+#pond\s*\{/);
-  assert.match(css, /body\.app-loading\s+\.pond-bed\s*\{[^}]*visibility\s*:\s*hidden/);
+  assert.doesNotMatch(css, /body\.app-loading\s+\.pond-bed\s*\{[^}]*visibility\s*:\s*hidden/);
   assert.match(appSource, /classList\.remove\(['"]app-loading['"]\)/);
-});
-
-test('延迟加载的动物素材通过渲染器热更新 WebGL 图集',()=>{
-  assert.match(appSource,/renderer\?\.setSprites\(loaded\)/);
-  assert.match(gl,/setSprites\(next\)/);
-  assert.match(gl,/packSprites\(sprites\)/);
-  assert.match(gl,/texSubImage2D\(gl\.TEXTURE_2D, 0, s\.x, s\.y, gl\.RGBA, gl\.UNSIGNED_BYTE, s\.canvas\)/);
 });
 
 test('启动资源失败时保留纯色加载背景并显示错误提示',()=>{
@@ -112,4 +95,51 @@ test('启动资源失败时保留纯色加载背景并显示错误提示',()=>{
   assert.doesNotMatch(appSource,/if\(!renderer\)\{document\.body\.classList\.remove\(['"]app-loading['"]\)/);
   assert.doesNotMatch(appSource,/if\(!bedImage\.naturalWidth\)\{document\.body\.classList\.remove\(['"]app-loading['"]\)/);
   assert.match(css,/body\.app-loading\s+#toast\s*\{[^}]*visibility\s*:\s*visible/);
+});
+
+test('底图切换通过渲染器热替换并保留遮罩接口',()=>{
+  assert.match(appSource,/renderer\?\.setBedImage\(image\)/);
+  assert.match(appSource,/setSeasonBackdrop\(path\)/);
+  assert.match(gl,/function setBedImage\(image, mask\)/);
+  assert.match(gl,/texImage2D\([\s\S]*mask\)/);
+});;
+
+
+
+test('白鹭运行时只使用用户提供的飞翔和水面 PNG',()=>{
+  for(const file of ['egret-flight.png','egret-rest.png']) assert.match(appSource,new RegExp(file.replace('.','\\.')));
+  assert.match(appSource,/Promise\.allSettled/);
+  assert.match(appSource,/spriteFor\(1,7\)/);
+  assert.match(appSource,/spriteFor\(2,7\)/);
+});
+
+test('白鹭只响应点击且投喂入口不会重复处理同一次点击',()=>{
+  assert.match(appSource,/canvas\.addEventListener\('pointerdown',e=>feedAt/);
+  assert.match(appSource,/function feedAt\(x,y\).*scene\.hitEgret\(x,y\)/s);
+  assert.match(scene,/disturbEgret\(x, y, click = false\)/);
+  assert.match(scene,/click \? this\.hitEgret/);
+});
+
+test('延迟加载动物素材通过 renderer 热更新图集',()=>{
+  assert.match(appSource,/renderer\?\.setSprites\(loaded\)/);
+  assert.match(gl,/setSprites\(next\)/);
+  assert.match(gl,/packSprites\(next\)/);
+  assert.match(gl,/texSubImage2D\(gl\.TEXTURE_2D, 0, s\.x, s\.y, gl\.RGBA, gl\.UNSIGNED_BYTE, s\.canvas\)/);
+});
+
+test('启动首帧后移除 app-loading 遮罩',()=>{
+  assert.match(appSource,/async function start\(\)/);
+  assert.match(appSource,/bedImage=await loadImage\(path\)/);
+  assert.match(appSource,/createPond\(\)/);
+  assert.match(appSource,/scene\.draw\(settings\)/);
+  assert.match(appSource,/document\.body\.classList\.remove\('app-loading'\)/);
+});
+
+test('WebGL 图集支持蝌蚪帧数组与两张白鹭状态贴图',()=>{
+  assert.match(gl,/function spriteEntries\(sprites\)/);
+  assert.match(gl,/if \(Array\.isArray\(value\)/);
+  assert.match(scene,/tadpoleFrames/);
+  assert.match(scene,/egretRest/);
+  assert.match(scene,/egretFlight/);
+  assert.doesNotMatch(appSource,/egret-master\.png/);
 });

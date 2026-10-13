@@ -3,7 +3,7 @@
 (function (root) {
   'use strict';
   const { BODY } = root.PondCore;
-  const ATLAS = 2048, FISH_PPU = 3.5, CELL_W = Math.round(BODY.width * FISH_PPU), CELL_H = Math.round(BODY.half * 2 * FISH_PPU);
+  const ATLAS = 4096, FISH_PPU = 3.5, CELL_W = Math.round(BODY.width * FISH_PPU), CELL_H = Math.round(BODY.half * 2 * FISH_PPU);
   const CELL_COLS = 6, CELL_PITCH_X = 340, CELL_PITCH_Y = CELL_H + 4, MISC_Y = CELL_PITCH_Y * 11 + 8, MAX_FISH = 66, SEG_UNITS = BODY.length / BODY.segments;
   const cellOrigin = i => [(i % CELL_COLS) * CELL_PITCH_X + 2, Math.floor(i / CELL_COLS) * CELL_PITCH_Y + 2];
 
@@ -434,17 +434,44 @@ void main(){
   const WHITE = [1, 1, 1, 1];
   const LAYERS = ['shadow', 'under', 'floaters', 'surface', 'airShadow', 'air', 'glow'];
 
-  // Shelf-pack misc sprites under the fish cells.
-  function packSprites(sprites) {
-    const list = Object.entries(sprites).sort((a, b) => b[1].canvas.height - a[1].canvas.height);
-    let x = 4, y = MISC_Y, shelf = 0;
-    for (const [, s] of list) {
-      const w = s.canvas.width, h = s.canvas.height;
-      if (x + w + 4 > ATLAS) { x = 4; y += shelf + 8; shelf = 0; }
-      if (y + h + 4 > ATLAS) throw Error('atlas full');
-      s.x = x; s.y = y; s.w = w; s.h = h; x += w + 8; shelf = Math.max(shelf, h);
-      s.u0 = s.x / ATLAS; s.v0 = s.y / ATLAS; s.u1 = (s.x + w) / ATLAS; s.v1 = (s.y + h) / ATLAS;
+  // Shelf-pack misc sprites under the fish cells. Some procedural sprites expose
+  // a small animation as an array (for example tadpoleFrames); each frame still
+  // needs its own atlas rectangle and UVs.
+  function spriteEntries(sprites) {
+    const list = [];
+    for (const [key, value] of Object.entries(sprites)) {
+      if (Array.isArray(value)) value.forEach((sprite, i) => { if (sprite?.canvas) list.push([`${key}[${i}]`, sprite]); });
+      else if (value?.canvas) list.push([key, value]);
     }
+    return list;
+  }
+  function packSprites(sprites) {
+    const list = spriteEntries(sprites).sort((a, b) => b[1].canvas.height - a[1].canvas.height);
+    const layout = () => {
+      let x = 4, y = MISC_Y, shelf = 0;
+      for (const [, s] of list) {
+        const w = s.canvas.width, h = s.canvas.height;
+        if (x + w + 4 > ATLAS) { x = 4; y += shelf + 8; shelf = 0; }
+        if (y + h + 4 > ATLAS) return false;
+        s.x = x; s.y = y; s.w = w; s.h = h; x += w + 8; shelf = Math.max(shelf, h);
+        s.u0 = s.x / ATLAS; s.v0 = s.y / ATLAS; s.u1 = (s.x + w) / ATLAS; s.v1 = (s.y + h) / ATLAS;
+      }
+      return true;
+    };
+    // Reference poses can be large enough that the fixed fish+misc atlas overflows.
+    // Downsample only the auxiliary sprites when necessary; scaling ppu by the same
+    // factor preserves their world-space size while keeping WebGL on the GPU path.
+    for (let attempt = 0; !layout() && attempt < 5; attempt++) {
+      const scale = .82;
+      for (const [, s] of list) {
+        const old = s.canvas, w = Math.max(1, Math.floor(old.width * scale)), h = Math.max(1, Math.floor(old.height * scale));
+        if (w === old.width && h === old.height) continue;
+        const c = document.createElement('canvas'); c.width = w; c.height = h;
+        const ctx = c.getContext('2d'); ctx.imageSmoothingEnabled = true; ctx.drawImage(old, 0, 0, w, h);
+        s.canvas = c; s.ppu *= scale;
+      }
+    }
+    if (!layout()) throw Error('atlas full');
     return sprites;
   }
 
@@ -508,7 +535,8 @@ void main(){
       gl.bindFramebuffer(gl.FRAMEBUFFER, fb); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
       const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      return ok ? { tex, fb, w, h } : null;
+      if (!ok) { gl.deleteTexture(tex); gl.deleteFramebuffer(fb); return null; }
+      return { tex, fb, w, h };
     }
     function freeTarget(t) { if (t) { gl.deleteTexture(t.tex); gl.deleteFramebuffer(t.fb); } }
 
@@ -529,7 +557,7 @@ void main(){
     const atlas = texture(ATLAS, ATLAS, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, null, gl.LINEAR_MIPMAP_LINEAR);
     packSprites(sprites);
     gl.bindTexture(gl.TEXTURE_2D, atlas);
-    for (const s of Object.values(sprites)) gl.texSubImage2D(gl.TEXTURE_2D, 0, s.x, s.y, gl.RGBA, gl.UNSIGNED_BYTE, s.canvas);
+    for (const [, s] of spriteEntries(sprites)) gl.texSubImage2D(gl.TEXTURE_2D, 0, s.x, s.y, gl.RGBA, gl.UNSIGNED_BYTE, s.canvas);
     let atlasDirty = true;
 
     const state = { w: 1, h: 1, dpr: 1, quality: 'high', material: 0, scene: null, shadow: null, caustic: null, surface: null, cloud: null, sim: [null, null], simW: 1, simH: 1, simAcc: 0, bed: { u: [1, 0, 0], v: [0, 1, 0], turn: 0 } };
@@ -541,16 +569,25 @@ void main(){
       const px = w * h * dpr * dpr, cap = quality === 'eco' ? 1.6e6 : 3.6e6, k = px > cap ? Math.sqrt(cap / px) : 1;
       canvas.width = Math.max(1, Math.round(w * dpr * k)); canvas.height = Math.max(1, Math.round(h * dpr * k));
       freeTarget(state.scene); freeTarget(state.shadow); freeTarget(state.caustic); freeTarget(state.surface); freeTarget(state.cloud); state.sim.forEach(freeTarget);
-      state.scene = target(canvas.width, canvas.height, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE);
+      // Allocate all render targets as one transaction. Some WebGL implementations
+      // report an incomplete framebuffer for large/limited surfaces; callers can then
+      // switch to the Canvas2D renderer instead of dereferencing a null texture.
+      const sceneTarget = target(canvas.width, canvas.height, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE);
+      if (!sceneTarget) { state.scene = state.shadow = state.caustic = state.surface = state.cloud = null; state.sim = [null, null]; return false; }
       // Shadows at half resolution keep a fish's outline (a smaller target averaged thin bodies away to nothing);
       // mipmaps let the bed blur them where the light is soft.
       const sd = quality === 'eco' ? 3 : 2;
-      state.shadow = target(Math.ceil(w / sd), Math.ceil(h / sd), gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE);
-      gl.bindTexture(gl.TEXTURE_2D, state.shadow.tex); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR); gl.generateMipmap(gl.TEXTURE_2D);
-      state.cloud = target(Math.ceil(w / 8), Math.ceil(h / 8), gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE);
+      const shadowTarget = target(Math.ceil(w / sd), Math.ceil(h / sd), gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE);
+      const cloudTarget = target(Math.ceil(w / 8), Math.ceil(h / 8), gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE);
       const cd = quality === 'eco' ? 3 : 2;
-      state.caustic = target(Math.ceil(w / cd), Math.ceil(h / cd), gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE);
-      state.surface = target(Math.ceil(w / cd), Math.ceil(h / cd), gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE);
+      const causticTarget = target(Math.ceil(w / cd), Math.ceil(h / cd), gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE);
+      const surfaceTarget = target(Math.ceil(w / cd), Math.ceil(h / cd), gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE);
+      if (!shadowTarget || !cloudTarget || !causticTarget || !surfaceTarget) {
+        freeTarget(sceneTarget); freeTarget(shadowTarget); freeTarget(cloudTarget); freeTarget(causticTarget); freeTarget(surfaceTarget);
+        state.scene = state.shadow = state.caustic = state.surface = state.cloud = null; state.sim = [null, null]; return false;
+      }
+      state.scene = sceneTarget; state.shadow = shadowTarget; state.cloud = cloudTarget; state.caustic = causticTarget; state.surface = surfaceTarget;
+      gl.bindTexture(gl.TEXTURE_2D, state.shadow.tex); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR); gl.generateMipmap(gl.TEXTURE_2D);
       const cell = quality === 'eco' ? 4 : 3;
       state.simW = Math.min(900, Math.ceil(w / cell)); state.simH = Math.min(900, Math.ceil(h / cell));
       state.sim = floatRT ? [0, 1].map(() => target(state.simW, state.simH, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT)) : [null, null];
@@ -558,16 +595,22 @@ void main(){
       for (const t of state.sim) if (t) { gl.bindFramebuffer(gl.FRAMEBUFFER, t.fb); gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT); }
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       state.bed = fitBed(bedImage.width, bedImage.height, w, h);
+      return true;
     }
     // Map a point of the painted pond image to screen CSS pixels.
     function imageToScreen(x, y) { return bedToScreen(state.bed, x / bedImage.width, y / bedImage.height, state.w, state.h); }
     function setBed(p) { gl.uniform3fv(p.u('uBedU'), state.bed.u); gl.uniform3fv(p.u('uBedV'), state.bed.v); }
-    function setBedImage(image) {
+    function setBedImage(image, mask) {
       if (!image?.naturalWidth) return;
       bedImage = image;
       gl.bindTexture(gl.TEXTURE_2D, bedTex);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, bedImage);
       gl.generateMipmap(gl.TEXTURE_2D);
+      if (mask) {
+        gl.bindTexture(gl.TEXTURE_2D, floatTex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, mask);
+        gl.generateMipmap(gl.TEXTURE_2D);
+      }
       state.bed = fitBed(bedImage.width, bedImage.height, state.w, state.h);
     }
 
@@ -584,7 +627,7 @@ void main(){
       for (const key of Object.keys(sprites)) delete sprites[key];
       Object.assign(sprites, next);
       gl.bindTexture(gl.TEXTURE_2D, atlas);
-      for (const s of Object.values(sprites)) gl.texSubImage2D(gl.TEXTURE_2D, 0, s.x, s.y, gl.RGBA, gl.UNSIGNED_BYTE, s.canvas);
+      for (const [, s] of spriteEntries(sprites)) gl.texSubImage2D(gl.TEXTURE_2D, 0, s.x, s.y, gl.RGBA, gl.UNSIGNED_BYTE, s.canvas);
       atlasDirty = true;
     }
 
@@ -783,7 +826,7 @@ void main(){
         // The CSS backdrop behind this canvas is a plain centred cover crop, so the painting is never turned here.
         state.bed = fitBed(bedImage.width, bedImage.height, w, h, false);
       },
-      setBedImage(image) { if(image?.naturalWidth){bedImage=image;state.bed=fitBed(bedImage.width,bedImage.height,state.w,state.h,false);} },
+      setBedImage(image, mask) { if(image?.naturalWidth){bedImage=image;state.bed=fitBed(bedImage.width,bedImage.height,state.w,state.h,false);} },
       setSprites(next) { for (const key of Object.keys(sprites)) delete sprites[key]; Object.assign(sprites, next); },
       setMaterial() {},
       imageToScreen(x, y) { return bedToScreen(state.bed, x / bedImage.width, y / bedImage.height, state.w, state.h); },
@@ -791,18 +834,28 @@ void main(){
       drop(x, y, r, s) { if (s > .05 && rings.length < 60) rings.push({ x, y, age: 0, max: 1 + Math.min(2, s * 3) }); },
       floater() {},
       sprite(layer, def, x, y, angle, sx, sy, color = WHITE) { if (layer !== 'shadow' && layer !== 'airShadow') queue[layer].push(['s', def, x, y, angle, sx, sy, color[3]]); },
-      fish(layer, cell, pose, s, cx, cy, k, color = WHITE) { if (layer === 'under' && fishCanvases[cell]) queue[layer].push(['f', fishCanvases[cell], Float32Array.from(pose), s, cx, cy, k, color[3]]); },
+      fish(layer, cell, pose, s, cx, cy, k, color = WHITE) {
+        if (layer === 'under' && fishCanvases[cell]) queue[layer].push(['f', fishCanvases[cell], Float32Array.from(pose), s, cx, cy, k, color]);
+      },
       render(time, dt) {
         ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0); ctx.clearRect(0, 0, state.w, state.h);
         for (const l of LAYERS) {
           ctx.globalCompositeOperation = l === 'glow' ? 'lighter' : 'source-over';
           for (const q of queue[l]) {
-            ctx.globalAlpha = q[q.length - 1];
             if (q[0] === 's') {
+            ctx.globalAlpha = q[q.length - 1];
               const [, def, x, y, angle, sx, sy] = q;
               ctx.save(); ctx.translate(x, y); ctx.rotate(angle); ctx.scale(sx / def.ppu, sy / def.ppu);
               ctx.drawImage(def.canvas, -def.px * def.canvas.width, -def.py * def.canvas.height); ctx.restore();
-            } else drawStrip2D(ctx, q[1], q[2], q[3], q[4], q[5], q[6]);
+            } else {
+              const color = q[7] || WHITE, brightness = Math.max(.35, (color[0] + color[1] + color[2]) / 3);
+              ctx.save();
+              ctx.globalAlpha = color[3] ?? 1;
+              const saturation = Math.max(.35, 1 + (Math.max(color[0], color[1], color[2]) - Math.min(color[0], color[1], color[2])) * 1.8);
+              ctx.filter = `brightness(${brightness}) saturate(${saturation})`;
+              drawStrip2D(ctx, q[1], q[2], q[3], q[4], q[5], q[6]);
+              ctx.restore();
+            }
           }
           queue[l].length = 0;
         }
@@ -820,5 +873,5 @@ void main(){
     if (!r) { target = canvas.cloneNode(); canvas.replaceWith(target); r = create2D(target, bedImage, sprites); }
     return r && Object.assign(r, { canvas: target });
   }
-  root.PondGL = { createRenderer, drawStrip2D, fitBed, bedToScreen, FISH_PPU, MAX_FISH };
+  root.PondGL = { createRenderer, create2D, drawStrip2D, fitBed, bedToScreen, FISH_PPU, MAX_FISH };
 })(window);
